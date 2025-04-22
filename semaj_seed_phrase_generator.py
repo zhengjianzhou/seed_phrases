@@ -96,12 +96,6 @@ def main_ui():
     root = tk.Tk()
     root.title("Semaj's SeedPhrase Generator")
     
-    root.grid_rowconfigure(0, weight=1)
-    root.grid_rowconfigure(1, weight=1)
-    root.grid_rowconfigure(2, weight=2)
-    root.grid_rowconfigure(3, weight=2)
-    root.grid_columnconfigure(0, weight=1)
-    
     seed_length_entry = tk.StringVar(root)
     seed_length_entry.set("24 Words")
     lang_select_entry = tk.StringVar(root)
@@ -118,16 +112,17 @@ def main_ui():
 
     input_group = tk.LabelFrame(root, text="Input", padx=10, pady=10)
     input_group.grid(row=2, column=0, columnspan=1, sticky="ew", padx=5, pady=5)
-    label1 = tk.Label(input_group, text="Please input your Source Phrases here", font=("Arial", 12), anchor='w')
+    input_group.grid_columnconfigure(0, weight=1)
+    label1 = tk.Label(input_group, text="Enter your Source Phrases here:", font=("Arial", 12), anchor='w')
     word_input_entry = tk.Entry(input_group, font=("Arial", 14))
-    label2 = tk.Label(input_group, text="Please input your passcode here, it can be empty or any ascii code except space", font=("Arial", 12), anchor='w')
+    label2 = tk.Label(input_group, text="Enter your Passcode here - make it as long as you can remember exactly!:", font=("Arial", 12), anchor='w')
     passcode_entry = tk.Entry(input_group, font=("Arial", 14))
     label1.grid(          row=0, column=0, sticky="ew", padx=10, pady=5)
     word_input_entry.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
     label2.grid(          row=2, column=0, sticky="ew", padx=10, pady=5)
     passcode_entry.grid(  row=3, column=0, sticky="ew", padx=10, pady=5)
     
-    generate_button = tk.Button(root, text="Generate Seed Phrase", font=("Arial", 16), command=generate_output)
+    generate_button = tk.Button(root, text="Generate Seed Phrases", font=("Arial", 16), command=generate_output)
     generate_button.grid(row=3, column=0, sticky="ew", padx=10, pady=10)
     
     output_group = tk.LabelFrame(root, text="Output", padx=10, pady=10)
@@ -138,8 +133,8 @@ def main_ui():
     output4 = tk.Text(output_group, height=1, wrap="word", font=("Arial", 12))
     
     label3 = tk.Label(output_group, text="Your input:", font=("Arial", 12), anchor='w')
-    label4 = tk.Label(output_group, text="Your Seed Phrase - Please keep them secure!!!", font=("Arial", 12), anchor='w')
-    label5 = tk.Label(output_group, text="Your Optional Pass Phrase - You may choose ANY of them!!!", font=("Arial", 12), anchor='w')
+    label4 = tk.Label(output_group, text="Your Seed Phrases - Please keep them secure!", font=("Arial", 12), anchor='w')
+    label5 = tk.Label(output_group, text="Your Optional Pass Phrases - ANY of them!!!", font=("Arial", 12), anchor='w')
 
     label3.grid (row=0, column=0, sticky="ew", padx=10, pady=5)
     output1.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
@@ -156,4 +151,3 @@ if __name__ == "__main__":
         main_cli()
     else:
         main_ui()
-
