@@ -16,7 +16,7 @@ def wd2idxs     (s,   wdl) : return ([wdl.index(i.lower()) for i in s if i.lower
 def sha256i     (s       ) : return int(hashlib.sha256(s.encode('utf8')).hexdigest(), 16)
 def idxs2eng    (idxs,wdl) : return ' '.join(wdl[i] for i in idxs)
 def bits2idxs   (bits    ) : return [int(bits[i:i+11], 2) for i in range(0, len(bits), 11)]
-def checksum    (i,     n) : return hex2bin(hashlib.sha256((i%2**n).to_bytes(n//8)).hexdigest(), n)[:n//32]  #bip-39
+def checksum    (i,     n) : return hex2bin(hashlib.sha256((i%2**n).to_bytes(n//8)).hexdigest(), 256)[:n//32]  #bip-39
 def ient2idxs   (i,     n) : return bits2idxs(int2bin(i%2**n,n)+checksum(i%2**n,n))
 def int2seedphs (i,     n) : return idxs2eng(ient2idxs(i%2**n,n), mnemonic.Mnemonic('english').wordlist)
 def int2b58     (i       ) : return base58.b58encode_int(i).decode('utf-8')
