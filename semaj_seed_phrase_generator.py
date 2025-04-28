@@ -79,6 +79,8 @@ class DrawingPad(tk.Frame):
 
         self.canvas.bind("<B1-Motion>", self.draw)
         self.canvas.bind("<Button-1>", self.draw)
+        self.canvas.bind("<B3-Motion>", self.erase)
+        self.canvas.bind("<Button-3>", self.erase)
 
         self.draw_grid()
 
@@ -92,15 +94,21 @@ class DrawingPad(tk.Frame):
                 self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill='black')
 
     def draw(self, event):
+        self.set_pixel(event, color="white", value=1)
+
+    def erase(self, event):
+        self.set_pixel(event, color="black", value=0)
+
+    def set_pixel(self, event, color, value):
         col = event.x // CELL_SIZE
         row = event.y // CELL_SIZE
         if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
-            self.pixels[row][col] = 1
+            self.pixels[row][col] = value
             x0 = col * CELL_SIZE
             y0 = row * CELL_SIZE
             x1 = x0 + CELL_SIZE
             y1 = y0 + CELL_SIZE
-            self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill='white')
+            self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=color)
 
     def save_image(self):
         filename = os.path.join(os.path.expanduser("~"), "Downloads", "SeedImage_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".png")
