@@ -27,6 +27,14 @@ def int2b58     (i       ) : return base58.b58encode_int(i).decode('utf-8')
 def strhash2b58 (s       ) : return int2b58(sha256i(s))
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
 
+def seed2entropy(words, n=256, lang='english'):
+    n_words = len(words)
+    mw = mnemonic.Mnemonic(lang)
+    i_words = from2048(wd2idxs(words, mw.wordlist))
+    i_ent = i_words >> (n_words * 11 - n)  # remove checksum
+    ent = int2bin(i_ent, n)
+    return ent
+
 def genseed(words, s='', additional_int=0, n=256, lang='chinese_simplified', use23wordsonly=False):
     mw = mnemonic.Mnemonic(lang)
     i_words = from2048(wd2idxs(words, mw.wordlist))
@@ -152,23 +160,29 @@ def main_ui():
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
         pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 6))
         indexed_seed_phrases = dict([(i+1, s) for i, s in enumerate(seed_phrases.split(' '))])
+
+        eff_entropy = seed2entropy(seed_phrases.split(' '), nbit)
     
         output1.config(state="normal")
+        outputE.config(state="normal")
         output2.config(state="normal")
         output3.config(state="normal")
         output4.config(state="normal")
 
         output1.delete(1.0, tk.END)
+        outputE.delete(1.0, tk.END)
         output2.delete(1.0, tk.END)
         output3.delete(1.0, tk.END)
         output4.delete(1.0, tk.END)
     
         output1.insert(tk.END, f"{' '.join(words_eff)}")
+        outputE.insert(tk.END, f"{eff_entropy}")
         output2.insert(tk.END, f"{seed_phrases}")
         output3.insert(tk.END, f"{indexed_seed_phrases}")
         output4.insert(tk.END, f"{pass_hash_b58_sp}")
 
         output1.config(state="disabled")
+        outputE.config(state="disabled")
         output2.config(state="disabled")
         output3.config(state="disabled")
         output4.config(state="disabled")
@@ -201,10 +215,10 @@ def main_ui():
     dropdown_group = tk.LabelFrame(root, text="Options", padx=10, pady=5)
     dropdown_group.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
     dropdown = tk.OptionMenu(dropdown_group, seed_length_entry, "12 Words", "23 Words (24 - but last word ignored)", "24 Words")
-    dropdown.config(font=("Arial", 12))
+    dropdown.config(font=("Arial", 10))
     dropdown.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
     dropdown_lang = tk.OptionMenu(dropdown_group, lang_select_entry, 'CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN')
-    dropdown_lang.config(font=("Arial", 12))
+    dropdown_lang.config(font=("Arial", 10))
     dropdown_lang.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
 
     input_group = tk.LabelFrame(root, text="Text Input", padx=10, pady=5)
@@ -243,21 +257,25 @@ def main_ui():
     output_group.grid_columnconfigure(0, weight=1)
     output_group.grid_rowconfigure(0, weight=1)
     output1 = tk.Text(output_group, height=1, wrap="word", font=("Arial", 12))
+    outputE = tk.Text(output_group, height=2, wrap="word", font=("Arial", 8))
     output2 = tk.Text(output_group, height=3, wrap="word", font=("Arial", 12))
     output3 = tk.Text(output_group, height=4, wrap="word", font=("Arial", 12))
     output4 = tk.Text(output_group, height=1, wrap="word", font=("Arial", 12))
     
-    label3 = tk.Label(output_group, text="Your input:", font=("Arial", 12), anchor='w')
+    label3 = tk.Label(output_group, text="Your Effective Text Input:", font=("Arial", 12), anchor='w')
+    labelE = tk.Label(output_group, text="Entropy of Your Seed Phrases:", font=("Arial", 12), anchor='w')
     label4 = tk.Label(output_group, text="Your Seed Phrases - Please keep them secure!", font=("Arial", 12), anchor='w')
-    label5 = tk.Label(output_group, text="Your Optional Pass Phrases - ANY of them!!!", font=("Arial", 12), anchor='w')
+    label5 = tk.Label(output_group, text="Your (Optional) Pass Phrases:", font=("Arial", 12), anchor='w')
 
     label3.grid (row=0, column=0, sticky="ew", padx=10, pady=2)
     output1.grid(row=1, column=0, sticky="ew", padx=10, pady=2)
-    label4.grid (row=2, column=0, sticky="ew", padx=10, pady=2)
-    output2.grid(row=3, column=0, sticky="ew", padx=10, pady=2)
-    output3.grid(row=4, column=0, sticky="ew", padx=10, pady=2)
-    label5.grid (row=5, column=0, sticky="ew", padx=10, pady=2)
-    output4.grid(row=6, column=0, sticky="ew", padx=10, pady=2)
+    labelE.grid (row=2, column=0, sticky="ew", padx=10, pady=2)
+    outputE.grid(row=3, column=0, sticky="ew", padx=10, pady=2)
+    label4.grid (row=4, column=0, sticky="ew", padx=10, pady=2)
+    output2.grid(row=5, column=0, sticky="ew", padx=10, pady=2)
+    output3.grid(row=6, column=0, sticky="ew", padx=10, pady=2)
+    label5.grid (row=7, column=0, sticky="ew", padx=10, pady=2)
+    output4.grid(row=8, column=0, sticky="ew", padx=10, pady=2)
     
     root.mainloop()
 
