@@ -107,6 +107,18 @@ class DrawingPad(tk.Frame):
     def erase(self, event):
         self.set_pixel(event, color="black", value=0)
 
+    def load_all_pixel(self, image_bit_string):
+        self.clear()
+        pixels = [(i%16, i//16, c) for i,c in enumerate(image_bit_string)]
+        for col,row,c in pixels:
+            if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
+                self.pixels[row][col] = int(c)
+                x0 = col * CELL_SIZE
+                y0 = row * CELL_SIZE
+                x1 = x0 + CELL_SIZE
+                y1 = y0 + CELL_SIZE
+                self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=('white' if c=='1' else 'black'))
+        
     def set_pixel(self, event, color, value):
         col = event.x // CELL_SIZE
         row = event.y // CELL_SIZE
@@ -201,6 +213,11 @@ def main_ui():
             image_bit_text.delete('1.0', tk.END)
             image_bit_text.insert(tk.END, bit_string)
             image_bit_text.config(state="disabled")
+            pad.load_all_pixel(bit_string)
+    
+    def load_and_process_bitstring():
+        bit_string = passcode_entry.get().strip()
+        pad.load_all_pixel(bit_string)
     
     root = tk.Tk()
     root.title("Semaj's SeedPhrase Generator")
@@ -238,16 +255,18 @@ def main_ui():
     pad = DrawingPad(image_group, saved_after_func=load_and_process_image)
     pad.grid(row=0, column=0, padx=10, pady=10)
     image_load_group = tk.LabelFrame(image_group, text="Image Load", padx=10, pady=5)
-    image_load_group.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5, pady=5)
+    image_load_group.grid(row=0, column=1, columnspan=4, sticky="ew", padx=5, pady=5)
 
-    load_button = tk.Button(image_load_group, text="Load Image", command=load_and_process_image)
-    load_button.grid(row=0, column=0, rowspan=1, sticky="w", padx=10, pady=5)
+    load_bit_button = tk.Button(image_load_group, text="Load BitString From Above PassCode Entry", command=load_and_process_bitstring)
+    load_bit_button.grid(row=0, column=0, rowspan=1, sticky="w", padx=10, pady=5)
+    load_button = tk.Button(image_load_group, text="Load Image From File", command=load_and_process_image)
+    load_button.grid(row=0, column=1, rowspan=1, sticky="w", padx=10, pady=5)
     image_label = tk.Label(image_load_group)
-    image_label.grid(row=0, column=1, rowspan=2, sticky="w", padx=10, pady=5)
+    image_label.grid(row=0, column=2, rowspan=2, sticky="w", padx=10, pady=5)
     path_label = tk.Label(image_load_group, text="")
     path_label.grid(row=1, column=0, rowspan=1, sticky="w", padx=10, pady=5)
     image_bit_text = tk.Text(image_load_group, height=4, font=("Arial", 12))
-    image_bit_text.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+    image_bit_text.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
 
     generate_button = tk.Button(root, text="Generate Seed Phrases", font=("Arial", 16), command=generate_output)
     generate_button.grid(row=4, column=0, sticky="ew", padx=10, pady=5)
