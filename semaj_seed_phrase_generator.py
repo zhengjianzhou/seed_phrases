@@ -27,6 +27,11 @@ def int2b58     (i       ) : return base58.b58encode_int(i).decode('utf-8')
 def strhash2b58 (s       ) : return int2b58(sha256i(s))
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
 
+def get256randnum():
+    entropy_bytes = os.urandom(32) # Generate 32 bytes (256 bits) of entropy
+    entropy_bin = bin(int.from_bytes(entropy_bytes, 'big'))[2:].zfill(256)
+    return entropy_bytes, entropy_bin
+
 def seed2entropy(words, n=256, lang='english'):
     n_words = len(words)
     mw = mnemonic.Mnemonic(lang)
@@ -45,13 +50,12 @@ def genseed(words, s='', additional_int=0, n=256, lang='chinese_simplified', use
         i_hash  = i_hash       << 3  # "<<3" to add 000 - to make up for 23word only seedgen logic
     return int2seedphs(i_words + i_hash + additional_int, n)
 
-def process_image(image_path, scale_factor=5):
+def process_image(image_path):
     image_size = 16
     img = Image.open(image_path)
     img_bw = img.resize((image_size, image_size), Image.BOX).convert('L').convert('1')
-    img_large = img_bw.resize((image_size * scale_factor, image_size * scale_factor), Image.BOX)
     bits = ''.join('1' if pixel else '0' for pixel in img_bw.getdata())
-    return img_large, bits
+    return bits
 
 def main_cli():
     args = (sys.argv[1:] + ['', '', '', ''])[:4]
@@ -203,18 +207,19 @@ def main_ui():
         if not file_path:
             file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")])
         if file_path:
-            processed_img, bit_string = process_image(file_path)
+            bit_string = process_image(file_path)
             bit_string_b58 = strhash2b58(bit_string) # use the last 4 b58 as image convert checksum
             path_label.config(text=file_path + f" | checksum: {bit_string_b58[-4:]}")
-            tk_img = ImageTk.PhotoImage(processed_img)
-            image_label.config(image=tk_img)
-            image_label.image = tk_img  # Keep reference
             image_bit_text.config(state="normal")
             image_bit_text.delete('1.0', tk.END)
             image_bit_text.insert(tk.END, bit_string)
             image_bit_text.config(state="disabled")
             pad.load_all_pixel(bit_string)
     
+    def gen_random_image():
+        _, bit_string = get256randnum()
+        pad.load_all_pixel(bit_string)
+
     def load_and_process_bitstring():
         bit_string = passcode_entry.get().strip()
         pad.load_all_pixel(bit_string)
@@ -243,7 +248,7 @@ def main_ui():
     input_group.grid_columnconfigure(0, weight=1)
     label1 = tk.Label(input_group, text="Enter your Source Phrases here:", font=("Arial", 12), anchor='w')
     word_input_entry = tk.Entry(input_group, font=("Arial", 14))
-    label2 = tk.Label(input_group, text="Enter your Passcode here - make it as long as you can remember exactly!:", font=("Arial", 12), anchor='w')
+    label2 = tk.Label(input_group, text="Enter your Passcode here:", font=("Arial", 12), anchor='w')
     passcode_entry = tk.Entry(input_group, font=("Arial", 14))
     label1.grid(          row=0, column=0, sticky="ew", padx=10, pady=0)
     word_input_entry.grid(row=1, column=0, sticky="ew", padx=10, pady=0)
@@ -254,19 +259,19 @@ def main_ui():
     image_group.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
     pad = DrawingPad(image_group, saved_after_func=load_and_process_image)
     pad.grid(row=0, column=0, padx=10, pady=10)
-    image_load_group = tk.LabelFrame(image_group, text="Image Load", padx=10, pady=5)
-    image_load_group.grid(row=0, column=1, columnspan=4, sticky="ew", padx=5, pady=5)
+    image_load_group = tk.LabelFrame(image_group, text="Load / Generate", padx=0, pady=0)
+    image_load_group.grid(row=0, column=1, columnspan=2, sticky="ew", padx=0, pady=0)
 
     load_bit_button = tk.Button(image_load_group, text="Load BitString From Above PassCode Entry", command=load_and_process_bitstring)
-    load_bit_button.grid(row=0, column=0, rowspan=1, sticky="w", padx=10, pady=5)
-    load_button = tk.Button(image_load_group, text="Load Image From File", command=load_and_process_image)
-    load_button.grid(row=0, column=1, rowspan=1, sticky="w", padx=10, pady=5)
-    image_label = tk.Label(image_load_group)
-    image_label.grid(row=0, column=2, rowspan=2, sticky="w", padx=10, pady=5)
+    load_bit_button.grid(row=0, column=0, rowspan=1, sticky="w", padx=10, pady=0)
+    load_randnum_button = tk.Button(image_load_group, text="Load Image From File", command=load_and_process_image)
+    load_randnum_button.grid(row=1, column=0, rowspan=1, sticky="w", padx=10, pady=0)
+    load_button = tk.Button(image_load_group, text="Generate Random Image", command=gen_random_image)
+    load_button.grid(row=2, column=0, rowspan=1, sticky="w", padx=10, pady=0)
     path_label = tk.Label(image_load_group, text="")
-    path_label.grid(row=1, column=0, rowspan=1, sticky="w", padx=10, pady=5)
+    path_label.grid(row=3, column=0, rowspan=1, sticky="w", padx=10, pady=0)
     image_bit_text = tk.Text(image_load_group, height=4, font=("Arial", 12))
-    image_bit_text.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=5)
+    image_bit_text.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=0)
 
     generate_button = tk.Button(root, text="Generate Seed Phrases", font=("Arial", 16), command=generate_output)
     generate_button.grid(row=4, column=0, sticky="ew", padx=10, pady=5)
