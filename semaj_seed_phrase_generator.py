@@ -11,6 +11,9 @@ import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageTk
 
+global OUTPUT_SEED_LANG
+OUTPUT_SEED_LANG = 'english'
+
 def int2bin     (i,     n) : return bin(i         )[2:].zfill(n)
 def hex2bin     (h,     n) : return bin(int(h, 16))[2:].zfill(n)
 def to2048      (n       ) : return ([] if n == 0 else to2048(n // 2048) + [n % 2048]) if n else []
@@ -22,7 +25,8 @@ def idxs2eng    (idxs,wdl) : return ' '.join(wdl[i] for i in idxs)
 def bits2idxs   (bits    ) : return [int(bits[i:i+11], 2) for i in range(0, len(bits), 11)]
 def checksum    (i,     n) : return hex2bin(hashlib.sha256((i%2**n).to_bytes(n//8)).hexdigest(), 256)[:n//32]  #bip-39
 def ient2idxs   (i,     n) : return bits2idxs(int2bin(i%2**n,n)+checksum(i%2**n,n))
-def int2seedphs (i,     n) : return idxs2eng(ient2idxs(i%2**n,n), mnemonic.Mnemonic('english').wordlist)
+def getwordlist (        ) : return mnemonic.Mnemonic(OUTPUT_SEED_LANG).wordlist
+def int2seedphs (i,     n) : return idxs2eng(ient2idxs(i%2**n,n), getwordlist())
 def int2b58     (i       ) : return base58.b58encode_int(i).decode('utf-8')
 def strhash2b58 (s       ) : return int2b58(sha256i(s))
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
@@ -32,7 +36,7 @@ def get256randnum():
     entropy_bin = bin(int.from_bytes(entropy_bytes, 'big'))[2:].zfill(256)
     return entropy_bytes, entropy_bin
 
-def seed2entropy(words, n=256, lang='english'):
+def seed2entropy(words, n, lang):
     n_words = len(words)
     mw = mnemonic.Mnemonic(lang)
     i_words = from2048(wd2idxs(words, mw.wordlist))
@@ -151,6 +155,10 @@ class DrawingPad(tk.Frame):
         self.draw_grid()
 
 def main_ui():
+    def set_output_lang(*args, **kwargs):
+        global OUTPUT_SEED_LANG 
+        OUTPUT_SEED_LANG = langOutput_select_entry.get().lower()
+
     def generate_output():
         word_input_raw = word_input_entry.get()
         passcode_str_raw = passcode_entry.get()
@@ -177,7 +185,7 @@ def main_ui():
         pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 6))
         indexed_seed_phrases = dict([(i+1, s) for i, s in enumerate(seed_phrases.split(' '))])
 
-        eff_entropy = seed2entropy(seed_phrases.split(' '), nbit)
+        eff_entropy = seed2entropy(seed_phrases.split(' '), nbit, OUTPUT_SEED_LANG)
     
         output1.config(state="normal")
         outputE.config(state="normal")
@@ -203,6 +211,13 @@ def main_ui():
         output3.config(state="disabled")
         output4.config(state="disabled")
 
+    def update_image_block(bit_string):
+        image_bit_text.config(state="normal")
+        image_bit_text.delete('1.0', tk.END)
+        image_bit_text.insert(tk.END, bit_string)
+        image_bit_text.config(state="disabled")
+        pad.load_all_pixel(bit_string)
+
     def load_and_process_image(file_path=None):
         if not file_path:
             file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")])
@@ -210,19 +225,15 @@ def main_ui():
             bit_string = process_image(file_path)
             bit_string_b58 = strhash2b58(bit_string) # use the last 4 b58 as image convert checksum
             path_label.config(text=file_path + f" | checksum: {bit_string_b58[-4:]}")
-            image_bit_text.config(state="normal")
-            image_bit_text.delete('1.0', tk.END)
-            image_bit_text.insert(tk.END, bit_string)
-            image_bit_text.config(state="disabled")
-            pad.load_all_pixel(bit_string)
+            update_image_block(bit_string)
     
     def gen_random_image():
         _, bit_string = get256randnum()
-        pad.load_all_pixel(bit_string)
+        update_image_block(bit_string)
 
     def load_and_process_bitstring():
         bit_string = passcode_entry.get().strip()
-        pad.load_all_pixel(bit_string)
+        update_image_block(bit_string)
     
     root = tk.Tk()
     root.title("Semaj's SeedPhrase Generator")
@@ -233,15 +244,24 @@ def main_ui():
     seed_length_entry.set("24 Words")
     lang_select_entry = tk.StringVar(root)
     lang_select_entry.set("CHINESE_SIMPLIFIED")
+    langOutput_select_entry = tk.StringVar(root)
+    langOutput_select_entry.set("ENGLISH")
 
     dropdown_group = tk.LabelFrame(root, text="Options", padx=10, pady=5)
     dropdown_group.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
     dropdown = tk.OptionMenu(dropdown_group, seed_length_entry, "12 Words", "23 Words (24 - but last word ignored)", "24 Words")
     dropdown.config(font=("Arial", 10))
     dropdown.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+    label_lang = tk.Label(dropdown_group, text="Source Text:", font=("Arial", 12), anchor='w')
+    label_lang.grid(          row=0, column=1, sticky="ew", padx=10, pady=0)
     dropdown_lang = tk.OptionMenu(dropdown_group, lang_select_entry, 'CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN')
     dropdown_lang.config(font=("Arial", 10))
-    dropdown_lang.grid(row=0, column=1, sticky="ew", padx=10, pady=5)
+    dropdown_lang.grid(row=0, column=2, sticky="ew", padx=10, pady=5)
+    label_langOutput = tk.Label(dropdown_group, text="Output Seed Phrase:", font=("Arial", 12), anchor='w')
+    label_langOutput.grid(          row=0, column=3, sticky="ew", padx=10, pady=0)
+    dropdown_langOutput = tk.OptionMenu(dropdown_group, langOutput_select_entry, 'CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN', command=set_output_lang)
+    dropdown_langOutput.config(font=("Arial", 10))
+    dropdown_langOutput.grid(row=0, column=4, sticky="ew", padx=10, pady=5)
 
     input_group = tk.LabelFrame(root, text="Text Input", padx=10, pady=5)
     input_group.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
