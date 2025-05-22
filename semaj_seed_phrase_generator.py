@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 ### To make it a runnable file on Mac / Windows using pyinstaller
-# pip3 install mnemonic base58 pillow pyinstaller
+# pip3 install mnemonic base58 base36 pillow pyinstaller
 # pyinstaller --onefile --windowed --icon=icon.icns --add-data "semaj_seed_phrase_generator.py:." semaj_seed_phrase_generator.py
 
-import hashlib, mnemonic, base58, sys, os
+import hashlib, mnemonic, base58, base36, sys, os
 from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog
@@ -28,6 +28,7 @@ def ient2idxs   (i,     n) : return bits2idxs(int2bin(i%2**n,n)+checksum(i%2**n,
 def getwordlist (        ) : return mnemonic.Mnemonic(OUTPUT_SEED_LANG).wordlist
 def int2seedphs (i,     n) : return idxs2eng(ient2idxs(i%2**n,n), getwordlist())
 def int2b58     (i       ) : return base58.b58encode_int(i).decode('utf-8')
+def int2b36     (i       ) : return base36.dumps(i).upper()
 def strhash2b58 (s       ) : return int2b58(sha256i(s))
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
 
@@ -223,8 +224,8 @@ def main_ui():
             file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")])
         if file_path:
             bit_string = process_image(file_path)
-            bit_string_b58 = strhash2b58(bit_string) # use the last 4 b58 as image convert checksum
-            path_label.config(text=file_path + f" | checksum: {bit_string_b58[-4:]}")
+            bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
+            path_label.config(text=file_path + f" | checksum: {''.join(sorted(bit_string_b36[-4:]))}")
             update_image_block(bit_string)
     
     def gen_random_image():
