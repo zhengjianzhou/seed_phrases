@@ -225,7 +225,8 @@ def main_ui():
         if file_path:
             bit_string = process_image(file_path)
             bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
-            path_label.config(text=file_path + f" | checksum: {''.join(sorted(bit_string_b36[-4:]))}")
+            bit_string_b36_checksum = ''.join(sorted(set(bit_string_b36[:4])))
+            path_label.config(text=file_path + f" | checksum: {bit_string_b36_checksum}")
             update_image_block(bit_string)
     
     def gen_random_image():
