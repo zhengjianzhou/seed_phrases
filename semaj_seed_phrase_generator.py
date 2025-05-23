@@ -31,6 +31,7 @@ def int2b58     (i       ) : return base58.b58encode_int(i).decode('utf-8')
 def int2b36     (i       ) : return base36.dumps(i).upper()
 def strhash2b58 (s       ) : return int2b58(sha256i(s))
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
+def dedup       (s       ) : return (lambda x=set(): ''.join(c for c in s if not (c in x or x.add(c))))()
 
 def get256randnum():
     entropy_bytes = os.urandom(32) # Generate 32 bytes (256 bits) of entropy
@@ -225,8 +226,9 @@ def main_ui():
         if file_path:
             bit_string = process_image(file_path)
             bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
-            bit_string_b36_checksum = ''.join(sorted(set(bit_string_b36[:4])))
-            path_label.config(text=file_path + f" | checksum: {bit_string_b36_checksum}")
+            bit_string_b36_checksum = dedup(bit_string_b36)[:4]
+            checksum_label.config(text=f"Checksum: {bit_string_b36_checksum}")
+            path_label.config(text=file_path)
             update_image_block(bit_string)
     
     def gen_random_image():
@@ -279,13 +281,14 @@ def main_ui():
     
     image_group = tk.LabelFrame(root, text="Image Input", padx=10, pady=5)
     image_group.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
+    image_group.grid_columnconfigure(0, weight=1)
     pad = DrawingPad(image_group, saved_after_func=load_and_process_image)
     pad.grid(row=0, column=0, padx=10, pady=10)
     image_load_group = tk.LabelFrame(image_group, text="Load / Generate", padx=5, pady=5)
-    image_load_group.grid(row=0, column=1, columnspan=3, sticky="ew", padx=5, pady=5)
+    image_load_group.grid(row=0, column=1, columnspan=4, sticky="ew", padx=5, pady=5)
 
     bit_string_entry = tk.Entry(image_load_group, font=("Arial", 12))
-    bit_string_entry.grid(row=0, column=0, columnspan=3, sticky="ew", padx=5, pady=0)
+    bit_string_entry.grid(row=0, column=0, columnspan=4, sticky="ew", padx=5, pady=0)
 
     load_bit_button = tk.Button(image_load_group, text="Load BitString From Above", command=load_and_process_bitstring)
     load_bit_button.grid(row=1, column=0, rowspan=1, sticky="w", padx=5, pady=5)
@@ -294,9 +297,11 @@ def main_ui():
     load_button = tk.Button(image_load_group, text="Generate Random Image", command=gen_random_image)
     load_button.grid(row=1, column=2, rowspan=1, sticky="w", padx=5, pady=5)
     image_bit_text = tk.Text(image_load_group, bg="lightgray", height=4, font=("Arial", 12))
-    image_bit_text.grid(row=2, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
+    image_bit_text.grid(row=2, column=0, columnspan=4, sticky="ew", padx=5, pady=5)
+    checksum_label = tk.Label(image_load_group, text="")
+    checksum_label.grid(row=3, column=0, columnspan=1, sticky="w", padx=5, pady=0)
     path_label = tk.Label(image_load_group, text="")
-    path_label.grid(row=3, column=0, columnspan=3, sticky="w", padx=5, pady=0)
+    path_label.grid(row=3, column=1, columnspan=3, sticky="w", padx=5, pady=0)
 
     generate_button = tk.Button(root, text="Generate Seed Phrases", font=("Arial", 16), command=generate_output)
     generate_button.grid(row=4, column=0, sticky="ew", padx=10, pady=5)
@@ -326,6 +331,7 @@ def main_ui():
     label5.grid (row=7, column=0, sticky="ew", padx=10, pady=2)
     output4.grid(row=8, column=0, sticky="ew", padx=10, pady=2)
     
+    #root.geometry("1080x900")
     root.mainloop()
 
 if __name__ == "__main__":
