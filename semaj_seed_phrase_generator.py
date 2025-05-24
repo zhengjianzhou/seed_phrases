@@ -220,24 +220,29 @@ def main_ui():
         image_bit_text.config(state="disabled")
         pad.load_all_pixel(bit_string)
 
+    def update_checksum(bit_string):
+        bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
+        bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
+        checksum_label.config(text=f"Checksum: {bit_string_b36_checksum}")
+
     def load_and_process_image(file_path=None):
         if not file_path:
             file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")])
         if file_path:
             bit_string = process_image(file_path)
-            bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
-            bit_string_b36_checksum = dedup(bit_string_b36)[:4]
-            checksum_label.config(text=f"Checksum: {bit_string_b36_checksum}")
             path_label.config(text=file_path)
             update_image_block(bit_string)
+            update_checksum(bit_string)
     
     def gen_random_image():
         _, bit_string = get256randnum()
         update_image_block(bit_string)
+        update_checksum(bit_string)
 
     def load_and_process_bitstring():
         bit_string = bit_string_entry.get().strip()
         update_image_block(bit_string)
+        update_checksum(bit_string)
     
     root = tk.Tk()
     root.title("Semaj's SeedPhrase Generator")
