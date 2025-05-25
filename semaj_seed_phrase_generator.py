@@ -64,17 +64,27 @@ def process_image(image_path):
     return bits
 
 def main_cli():
-    args = (sys.argv[1:] + ['', '', '', ''])[:4]
-    words, passcode, nbit, lang = args[:4]
-    nbit = int(nbit) if nbit else 256
-    lang = lang if lang else 'chinese_simplified'
-    words = words if lang.startswith('chinese') else words.split(' ')
-    words_eff = wd2effwd(words, mnemonic.Mnemonic(lang).wordlist)
-    print( "---> INPUT:", words_eff, passcode, nbit, lang)
-    print( "OLD Version->", genseed(words, passcode, 0, nbit, lang, True ) )
-    print( "NEW SEED   ->", genseed(words, passcode, 0, nbit, lang, False) )
-    pass_hash_b58 = strhash2b58(passcode) if passcode else ''
-    print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {' '.join(splitstr(pass_hash_b58, 4))}")
+    if '-h' in sys.argv or '--help' in sys.argv:
+        print(f'Usage:\npython3 {__file__.split(r"/")[-1]} "YourWords" "YourPasscode" "RawBits(upto 256bits)" "nbits", "LanguageOfWords"')
+        print(f'Example 1:\npython3 {__file__.split(r"/")[-1]} "我的字符串" "PassCodeX12" 0110011111000000000 256 Chinese_Simplified')
+        print(f'Example 2:\npython3 {__file__.split(r"/")[-1]} "abandon good" "PassCdXAB" 0110011111000000000 256 English')
+    else:
+        args = (sys.argv[1:] + ['', '', '', '', ''])[:5]
+        words, passcode, bit_string, nbit, lang = args[:5]
+        image_int = int(bit_string,2) if bit_string else 0
+        nbit = int(nbit) if nbit else 256
+        lang = lang.lower() if lang else 'chinese_simplified'
+        words = words if lang.startswith('chinese') else words.split(' ')
+        words_eff = wd2effwd(words, mnemonic.Mnemonic(lang).wordlist)
+        print( "---> INPUT:", words_eff, passcode, bit_string, nbit, lang)
+        print( "OLD Version->", genseed(words, passcode, image_int, nbit, lang, True ) )
+        print( "NEW SEED   ->", genseed(words, passcode, image_int, nbit, lang, False) )
+        pass_hash_b58 = strhash2b58(passcode) if passcode else ''
+        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 6))
+        print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp}")
+        bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
+        bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
+        print(f"Raw Bits Checksum: {bit_string_b36_checksum}")
 
 ### tkinter ui main function
 CELL_SIZE = 10
@@ -340,7 +350,7 @@ def main_ui():
     root.mainloop()
 
 if __name__ == "__main__":
-    if len(sys.argv[1:]) > 1:
+    if len(sys.argv[1:]) >= 1:
         main_cli()
     else:
         main_ui()
