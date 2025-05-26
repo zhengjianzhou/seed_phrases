@@ -14,6 +14,11 @@ from PIL import Image, ImageTk
 global OUTPUT_SEED_LANG
 OUTPUT_SEED_LANG = 'english'
 
+HEX_SYMBOL_DICT = dict(zip('0123456789ABCDEF', '─│┌┐└┘├┤┬┴┼╱╲╳╵╷'))
+SYMBOL_HEX_DICT = dict(zip('─│┌┐└┘├┤┬┴┼╱╲╳╵╷', '0123456789ABCDEF'))
+
+def hex2line    (h       ) : return ''.join([HEX_SYMBOL_DICT[i] for i in h])
+def line2hex    (l       ) : return ''.join([SYMBOL_HEX_DICT[i] for i in l])
 def int2bin     (i,     n) : return bin(i         )[2:].zfill(n)
 def hex2bin     (h,     n) : return bin(int(h, 16))[2:].zfill(n)
 def to2048      (n       ) : return ([] if n == 0 else to2048(n // 2048) + [n % 2048]) if n else []
@@ -226,11 +231,12 @@ def main_ui():
     def update_image_block(bit_string):
         image_bit_text.config(state="normal")
         image_bit_text.delete('1.0', tk.END)
-        image_bit_text.insert(tk.END, bit_string)
+        image_bit_text.insert(tk.END, bit_string.zfill(256))
         image_bit_text.config(state="disabled")
         image_hex_text.config(state="normal")
         image_hex_text.delete('1.0', tk.END)
-        image_hex_text.insert(tk.END, hex(int(bit_string,2))[2:].zfill(64).upper())
+        hex_string = hex(int(bit_string,2) if bit_string else 0)[2:].zfill(64).upper()
+        image_hex_text.insert(tk.END, hex2line(hex_string))
         image_hex_text.config(state="disabled")
         pad.load_all_pixel(bit_string)
 
@@ -255,6 +261,10 @@ def main_ui():
 
     def load_and_process_bitstring():
         bit_string = bit_string_entry.get().strip()
+        ords = [ord(i) for i in bit_string]
+        if min(ords) > 9400 and max(ords) < 9700:
+            hex_string = line2hex(bit_string)
+            bit_string = hex2bin(hex_string, 256)
         update_image_block(bit_string)
         update_checksum(bit_string)
     
@@ -304,7 +314,7 @@ def main_ui():
     pad = DrawingPad(image_group, saved_after_func=load_and_process_image)
     image_bit_text = tk.Text(image_group, bg="lightgray", width=16, height=16, font=("Courier", 8))
     image_hex_text = tk.Text(image_group, bg="lightgray", width=8, height=8, font=("Courier", 17))
-    load_bit_button = tk.Button(image_group, text="Load BitString ->", command=load_and_process_bitstring)
+    load_bit_button = tk.Button(image_group, text="Load BitString↴", command=load_and_process_bitstring)
     bit_string_entry = tk.Entry(image_group, width=50, font=("Courier", 10))
     load_button = tk.Button(image_group, text="Load Image File", command=load_and_process_image)
     load_randnum_button = tk.Button(image_group, text="Generate Random Image", command=gen_random_image)
