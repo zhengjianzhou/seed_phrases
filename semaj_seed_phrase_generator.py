@@ -86,7 +86,12 @@ def main_cli():
         seed_phrases_new = genseed(words, passcode, image_int, nbit, lang, False)
         print( "OLD Version->", seed_phrases_old)
         print( "NEW SEED   ->", seed_phrases_new)
-        print( "NEW SEED Entropy ->", seed2entropy(seed_phrases_new.split(' '), nbit, 'english'))
+        seed_ent = seed2entropy(seed_phrases_new.split(' '), nbit, 'english')
+        print( "NEW SEED Entropy ->", seed_ent)
+        print("-"*16)
+        for i in range(16):
+            print(seed_ent[i*nbit//16:(i+1)*nbit//16])
+        print("-"*16)
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
         pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
         print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp}")
