@@ -7,15 +7,14 @@
 
 import hashlib, mnemonic, base58, base36, sys, os
 from datetime import datetime
-import tkinter as tk
-from tkinter import filedialog
-from PIL import Image, ImageTk
 
 global OUTPUT_SEED_LANG
 OUTPUT_SEED_LANG = 'english'
 
-HEX_SYMBOL_DICT = dict(zip('0123456789ABCDEF', '─│┌┐└┘├┤┬┴┼╱╲╳╵╷'))
-SYMBOL_HEX_DICT = dict(zip('─│┌┐└┘├┤┬┴┼╱╲╳╵╷', '0123456789ABCDEF'))
+THE_SYMBOLS = '─│┌┐└┘├┤┬┴┼╱╲╳╵╷'
+#THE_SYMBOLS = ' ▀▄█▌▐▖▗▘▙▚▛▜▝▞▟'
+HEX_SYMBOL_DICT = dict(zip('0123456789ABCDEF', THE_SYMBOLS))
+SYMBOL_HEX_DICT = dict(zip(THE_SYMBOLS, '0123456789ABCDEF'))
 
 def hex2line    (h       ) : return ''.join([HEX_SYMBOL_DICT[i] for i in h])
 def line2hex    (l       ) : return ''.join([SYMBOL_HEX_DICT[i] for i in l])
@@ -62,6 +61,7 @@ def genseed(words, s='', additional_int=0, n=256, lang='chinese_simplified', use
     return int2seedphs(i_words + i_hash + additional_int, n)
 
 def process_image(image_path):
+    from PIL import Image
     image_size = 16
     img = Image.open(image_path)
     img_bw = img.resize((image_size, image_size), Image.BOX).convert('L').convert('1')
@@ -82,96 +82,103 @@ def main_cli():
         words = words if lang.startswith('chinese') else words.split(' ')
         words_eff = wd2effwd(words, mnemonic.Mnemonic(lang).wordlist)
         print( "---> INPUT:", words_eff, passcode, bit_string, nbit, lang)
-        print( "OLD Version->", genseed(words, passcode, image_int, nbit, lang, True ) )
-        print( "NEW SEED   ->", genseed(words, passcode, image_int, nbit, lang, False) )
+        seed_phrases_old = genseed(words, passcode, image_int, nbit, lang, True )
+        seed_phrases_new = genseed(words, passcode, image_int, nbit, lang, False)
+        print( "OLD Version->", seed_phrases_old)
+        print( "NEW SEED   ->", seed_phrases_new)
+        print( "NEW SEED Entropy ->", seed2entropy(seed_phrases_new.split(' '), nbit, 'english'))
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
-        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 6))
+        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
         print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp}")
         bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
         bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
         print(f"Raw Bits Checksum: {bit_string_b36_checksum}")
 
-### tkinter ui main function
-CELL_SIZE = 10
-GRID_SIZE = 16
-class DrawingPad(tk.Frame):
-    def __init__(self, master=None, saved_after_func=None, **kwargs):
-        super().__init__(master, **kwargs)
+def main_ui():
+    import tkinter as tk
+    from tkinter import filedialog
 
-        self.saved_after_func = saved_after_func 
-        self.canvas = tk.Canvas(self, width=CELL_SIZE*GRID_SIZE, height=CELL_SIZE*GRID_SIZE, bg='gray')
-        self.canvas.grid(row=0, column=0, columnspan=2)
-
-        self.save_button = tk.Button(self, text="Save", command=self.save_image)
-        self.save_button.grid(row=1, column=0, pady=5, sticky="ew")
-
-        self.clear_button = tk.Button(self, text="Clear", command=self.clear)
-        self.clear_button.grid(row=1, column=1, pady=5, sticky="ew")
-
-        self.pixels = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-
-        self.canvas.bind("<B1-Motion>", self.draw)
-        self.canvas.bind("<Button-1>", self.draw)
-        self.canvas.bind("<B3-Motion>", self.erase)
-        self.canvas.bind("<Button-3>", self.erase)
-
-        self.draw_grid()
-
-    def draw_grid(self):
-        for i in range(GRID_SIZE):
-            for j in range(GRID_SIZE):
-                x0 = j * CELL_SIZE
-                y0 = i * CELL_SIZE
-                x1 = x0 + CELL_SIZE
-                y1 = y0 + CELL_SIZE
-                self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill='black')
-
-    def draw(self, event):
-        self.set_pixel(event, color="white", value=1)
-
-    def erase(self, event):
-        self.set_pixel(event, color="black", value=0)
-
-    def load_all_pixel(self, image_bit_string):
-        self.clear()
-        pixels = [(i%16, i//16, c) for i,c in enumerate(image_bit_string)]
-        for col,row,c in pixels:
+    ### tkinter ui main function
+    CELL_SIZE = 10
+    GRID_SIZE = 16
+    class DrawingPad(tk.Frame):
+        def __init__(self, master=None, saved_after_func=None, **kwargs):
+            super().__init__(master, **kwargs)
+    
+            self.saved_after_func = saved_after_func 
+            self.canvas = tk.Canvas(self, width=CELL_SIZE*GRID_SIZE, height=CELL_SIZE*GRID_SIZE, bg='gray')
+            self.canvas.grid(row=0, column=0, columnspan=2)
+    
+            self.save_button = tk.Button(self, text="Save", command=self.save_image)
+            self.save_button.grid(row=1, column=0, pady=5, sticky="ew")
+    
+            self.clear_button = tk.Button(self, text="Clear", command=self.clear)
+            self.clear_button.grid(row=1, column=1, pady=5, sticky="ew")
+    
+            self.pixels = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    
+            self.canvas.bind("<B1-Motion>", self.draw)
+            self.canvas.bind("<Button-1>", self.draw)
+            self.canvas.bind("<B3-Motion>", self.erase)
+            self.canvas.bind("<Button-3>", self.erase)
+    
+            self.draw_grid()
+    
+        def draw_grid(self):
+            for i in range(GRID_SIZE):
+                for j in range(GRID_SIZE):
+                    x0 = j * CELL_SIZE
+                    y0 = i * CELL_SIZE
+                    x1 = x0 + CELL_SIZE
+                    y1 = y0 + CELL_SIZE
+                    self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill='black')
+    
+        def draw(self, event):
+            self.set_pixel(event, color="white", value=1)
+    
+        def erase(self, event):
+            self.set_pixel(event, color="black", value=0)
+    
+        def load_all_pixel(self, image_bit_string):
+            self.clear()
+            pixels = [(i%16, i//16, c) for i,c in enumerate(image_bit_string)]
+            for col,row,c in pixels:
+                if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
+                    self.pixels[row][col] = int(c)
+                    x0 = col * CELL_SIZE
+                    y0 = row * CELL_SIZE
+                    x1 = x0 + CELL_SIZE
+                    y1 = y0 + CELL_SIZE
+                    self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=('white' if c=='1' else 'black'))
+            
+        def set_pixel(self, event, color, value):
+            col = event.x // CELL_SIZE
+            row = event.y // CELL_SIZE
             if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
-                self.pixels[row][col] = int(c)
+                self.pixels[row][col] = value
                 x0 = col * CELL_SIZE
                 y0 = row * CELL_SIZE
                 x1 = x0 + CELL_SIZE
                 y1 = y0 + CELL_SIZE
-                self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=('white' if c=='1' else 'black'))
-        
-    def set_pixel(self, event, color, value):
-        col = event.x // CELL_SIZE
-        row = event.y // CELL_SIZE
-        if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
-            self.pixels[row][col] = value
-            x0 = col * CELL_SIZE
-            y0 = row * CELL_SIZE
-            x1 = x0 + CELL_SIZE
-            y1 = y0 + CELL_SIZE
-            self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=color)
+                self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=color)
+    
+        def save_image(self):
+            from PIL import Image
+            filename = os.path.join(os.path.expanduser("~"), "Downloads", "SeedImage_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".png")
+            img = Image.new('1', (GRID_SIZE, GRID_SIZE), color=0)
+            for y in range(GRID_SIZE):
+                for x in range(GRID_SIZE):
+                    if self.pixels[y][x] == 1:
+                        img.putpixel((x, y), 1)
+            img.save(filename)
+            if self.saved_after_func:
+                self.saved_after_func(filename)
+    
+        def clear(self):
+            self.pixels = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+            self.canvas.delete("all")
+            self.draw_grid()
 
-    def save_image(self):
-        filename = os.path.join(os.path.expanduser("~"), "Downloads", "SeedImage_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".png")
-        img = Image.new('1', (GRID_SIZE, GRID_SIZE), color=0)
-        for y in range(GRID_SIZE):
-            for x in range(GRID_SIZE):
-                if self.pixels[y][x] == 1:
-                    img.putpixel((x, y), 1)
-        img.save(filename)
-        if self.saved_after_func:
-            self.saved_after_func(filename)
-
-    def clear(self):
-        self.pixels = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-        self.canvas.delete("all")
-        self.draw_grid()
-
-def main_ui():
     def set_output_lang(*args, **kwargs):
         global OUTPUT_SEED_LANG 
         OUTPUT_SEED_LANG = langOutput_select_entry.get().lower()
@@ -199,7 +206,7 @@ def main_ui():
             seed_phrases = genseed(words, passcode, image_int, nbit, lang, False)
 
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
-        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 6))
+        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
         indexed_seed_phrases = dict([(i+1, s) for i, s in enumerate(seed_phrases.split(' '))])
 
         eff_entropy = seed2entropy(seed_phrases.split(' '), nbit, OUTPUT_SEED_LANG)
