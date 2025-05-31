@@ -5,7 +5,7 @@
 # pip3 install mnemonic base58 base36 pillow pyinstaller
 # pyinstaller --onefile --windowed --icon=icon.icns --add-data "semaj_seed_phrase_generator.py:." semaj_seed_phrase_generator.py
 
-import hashlib, mnemonic, base58, base36, sys, os
+import hashlib, mnemonic, base58, base36, sys, os, math
 from datetime import datetime
 
 global OUTPUT_SEED_LANG
@@ -68,36 +68,112 @@ def process_image(image_path):
     bits = ''.join('1' if pixel else '0' for pixel in img_bw.getdata())
     return bits
 
+def print_seed_grid(seed_phrase):
+    words = seed_phrase.split(' ')
+    NCOLS = 5
+    nrows = math.ceil(len(words) / 5)
+    cols = [str(i) for i in range(1, NCOLS+1)]
+    
+    max_len = max(len(word) for word in words)
+    col_width = max(max_len, NCOLS)  # minimum width
+    
+    # Box drawing characters
+    TL = '┌'  # top left
+    TR = '┐'  # top right
+    BL = '└'  # bottom left
+    BR = '┘'  # bottom right
+    HL = '─'  # horizontal line
+    VL = '│'  # vertical line
+    TJ = '┬'  # top junction
+    BJ = '┴'  # bottom junction
+    LJ = '├'  # left junction
+    RJ = '┤'  # right junction
+    CJ = '┼'  # center junction
+    
+    # Build top border with column labels above it
+    col_headers = '    ' + ''.join(f' {c.center(col_width)} ' for c in cols)
+    print(col_headers)
+    
+    # Top border
+    top_border = TL + (HL * (col_width + 2))
+    for _ in range(NCOLS-1):
+        top_border += TJ + (HL * (col_width + 2))
+    top_border += TR
+    print(top_border)
+    
+    # Print rows
+    for r_idx in range(nrows):
+        # Row with labels and words
+        row_words = words[r_idx * NCOLS : (r_idx + 1) * NCOLS]
+        row_line = f'{VL}'
+        for w in row_words:
+            row_line += f' {w.center(col_width)} {VL}'
+        print(row_line)
+        
+        # Print separator line after every row except last
+        if r_idx < nrows - 1:
+            sep_line = LJ + (HL * (col_width + 2))
+            for _ in range(NCOLS-1):
+                sep_line += CJ + (HL * (col_width + 2))
+            sep_line += RJ
+            print(sep_line)
+
+    # Bottom border
+    bottom_border = BL + (HL * (col_width + 2))
+    for _ in range(NCOLS-1):
+        bottom_border += BJ + (HL * (col_width + 2))
+    bottom_border += BR
+    print(bottom_border)
+
+def cli_draw_16x16(bitstring):
+    if any(c not in ('0', '1') for c in bitstring):
+        raise ValueError("Input string must contain only '0' and '1'.")
+
+    bit_string_b36 = int2b36(sha256i(bitstring)) # use the last 4 b58 as image convert checksum
+    bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
+
+    black_block, white_block = '⬛', '⬜'
+    print("-"*32)
+    print("|  "+f'0:{black_block} | 1:{white_block } | Checksum:{bit_string_b36_checksum}'+" |")
+    print("-"*32)
+    for row in range(16):
+        segment = bitstring[row * 16 : (row + 1) * 16]
+        line = ''.join(white_block if bit == '1' else black_block for bit in segment)
+        print(line)
+    print("-"*32)
+
 def main_cli():
     if '-h' in sys.argv or '--help' in sys.argv:
         print(f'Usage:\npython3 {__file__.split(r"/")[-1]} "YourWords" "YourPasscode" "RawBits(upto 256bits)" "nbits", "LanguageOfWords"')
         print(f'Example 1:\npython3 {__file__.split(r"/")[-1]} "我的字符串" "PassCodeX12" 0110011111000000000 256 Chinese_Simplified')
         print(f'Example 2:\npython3 {__file__.split(r"/")[-1]} "abandon good" "PassCdXAB" 0110011111000000000 256 English')
     else:
-        args = (sys.argv[1:] + ['', '', '', '', ''])[:5]
-        words, passcode, bit_string, nbit, lang = args[:5]
+        if '-c' in sys.argv or '--cli' in sys.argv:
+            nbit = input('Please enter number of bits: Enter for 256:') or '256'
+            lang = input('Please enter the source text language: Enter for Simplified_Chinese:') or 'chinese_simplified'
+            words = input(f'Please enter the source text (in {lang}): Enter for None:')
+            passcode = input('Please enter passcode to be sha256-ed and to be added-on: Enter for None:')
+            bit_string = input('Please enter a bitstring (upto 256bit) to be added-on: Enter for None:')
+        else:
+            args = (sys.argv[1:] + ['', '', '', '', ''])[:5]
+            words, passcode, bit_string, nbit, lang = args[:5]
         image_int = int(bit_string,2) if bit_string else 0
         nbit = int(nbit) if nbit else 256
         lang = lang.lower() if lang else 'chinese_simplified'
         words = words if lang.startswith('chinese') else words.split(' ')
         words_eff = wd2effwd(words, mnemonic.Mnemonic(lang).wordlist)
-        print( "---> INPUT:", words_eff, passcode, bit_string, nbit, lang)
+        print( "---> INPUT:", ' '.join(words_eff), passcode, bit_string, nbit, lang)
         seed_phrases_old = genseed(words, passcode, image_int, nbit, lang, True )
         seed_phrases_new = genseed(words, passcode, image_int, nbit, lang, False)
         print( "OLD Version->", seed_phrases_old)
         print( "NEW SEED   ->", seed_phrases_new)
+        print_seed_grid(seed_phrases_new)
         seed_ent = seed2entropy(seed_phrases_new.split(' '), nbit, 'english')
         print( "NEW SEED Entropy ->", seed_ent)
-        print("-"*16)
-        for i in range(16):
-            print(seed_ent[i*nbit//16:(i+1)*nbit//16])
-        print("-"*16)
+        cli_draw_16x16(seed_ent)
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
         pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
         print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp}")
-        bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
-        bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
-        print(f"Raw Bits Checksum: {bit_string_b36_checksum}")
 
 def main_ui():
     import tkinter as tk
