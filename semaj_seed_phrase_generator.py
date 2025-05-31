@@ -454,4 +454,8 @@ if __name__ == "__main__":
     if len(sys.argv[1:]) >= 1:
         main_cli()
     else:
-        main_ui()
+        try:
+            main_ui()
+        except:
+            main_cli()
+
