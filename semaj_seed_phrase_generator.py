@@ -142,13 +142,13 @@ def cli_draw_16x16(bitstring):
         print(line)
     print("-"*32)
 
-def main_cli():
+def main_cli(interactive=False):
     if '-h' in sys.argv or '--help' in sys.argv:
         print(f'Usage:\npython3 {__file__.split(r"/")[-1]} "YourWords" "YourPasscode" "RawBits(upto 256bits)" "nbits", "LanguageOfWords"')
         print(f'Example 1:\npython3 {__file__.split(r"/")[-1]} "我的字符串" "PassCodeX12" 0110011111000000000 256 Chinese_Simplified')
         print(f'Example 2:\npython3 {__file__.split(r"/")[-1]} "abandon good" "PassCdXAB" 0110011111000000000 256 English')
     else:
-        if '-c' in sys.argv or '--cli' in sys.argv:
+        if interactive or '-c' in sys.argv or '--cli' in sys.argv:
             nbit = input('Please enter number of bits: Enter for 256:') or '256'
             lang = input('Please enter the source text language: Enter for Simplified_Chinese:') or 'chinese_simplified'
             words = input(f'Please enter the source text (in {lang}): Enter for None:')
@@ -457,5 +457,5 @@ if __name__ == "__main__":
         try:
             main_ui()
         except:
-            main_cli()
+            main_cli(True)
 
