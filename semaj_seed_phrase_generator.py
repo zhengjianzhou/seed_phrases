@@ -2,11 +2,132 @@
 # -*- coding: utf-8 -*-
 
 ### To make it a runnable file on Mac / Windows using pyinstaller
-# pip3 install mnemonic base58 base36 pillow pyinstaller
+# pip3 install mnemonic qrcode pillow pyinstaller
 # pyinstaller --onefile --windowed --icon=icon.icns --add-data "semaj_seed_phrase_generator.py:." semaj_seed_phrase_generator.py
 
-import hashlib, mnemonic, base58, base36, sys, os, math
+import sys, os, math
+import hashlib
+import hmac
+import binascii
+import struct
+from mnemonic import Mnemonic
+import qrcode
 from datetime import datetime
+
+def generate_qrcode(text: str) -> None:
+    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=1, border=1)
+    qr.add_data(text)
+    qr.make(fit=True)
+    matrix = qr.get_matrix()
+    rows = len(matrix)
+    for y in range(0, rows, 2):
+        top = matrix[y]
+        bottom = matrix[y + 1] if y + 1 < rows else [False] * len(top)
+        line = ""
+        for t, b in zip(top, bottom):
+            if t and b:
+                line += "█"   # Full block
+            elif t and not b:
+                line += "▀"   # Upper half block
+            elif not t and b:
+                line += "▄"   # Lower half block
+            else:
+                line += " "   # Space
+        print(line)
+
+def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
+    mnemonic_norm = mnemonic.strip().encode("utf-8")
+    salt = b"mnemonic" + passphrase.encode("utf-8")
+    seed = hashlib.pbkdf2_hmac("sha512", mnemonic_norm, salt, 2048)
+    return seed  # 64 bytes
+
+def slip10_derive_master_key(seed: bytes) -> (bytes, bytes):
+    I = hmac.new(b"ed25519 seed", seed, hashlib.sha512).digest()
+    return I[:32], I[32:]
+
+def slip10_derive_child(parent_key: bytes, parent_chain_code: bytes, index: int) -> (bytes, bytes):
+    assert 0 <= index < 2**31, "Index must be in [0, 2^31)"
+    i_hardened = index + (1 << 31)
+    data = b"\x00" + parent_key + i_hardened.to_bytes(4, "big")
+    I = hmac.new(parent_chain_code, data, hashlib.sha512).digest()
+    return I[:32], I[32:]
+
+_q = 2**255 - 19
+_d = (-121665 * pow(121666, _q - 2, _q)) % _q
+_Bx = 15112221349535400772501151409588531511454012693041857206046113283949847762202
+_By = 46316835694926478169428394003475163141307993866256225615783033603165251855960
+_I = pow(2, (_q - 1) // 4, _q)
+
+def _edwards_add(P, Q):
+    x1, y1 = P
+    x2, y2 = Q
+    denom_x = (1 + (_d * x1 * x2 * y1 * y2) % _q) % _q
+    denom_y = (1 - (_d * x1 * x2 * y1 * y2) % _q) % _q
+    inv_denom_x = pow(denom_x, _q - 2, _q)
+    inv_denom_y = pow(denom_y, _q - 2, _q)
+    x3 = ( (x1 * y2 + x2 * y1) * inv_denom_x ) % _q
+    y3 = ( (y1 * y2 + x1 * x2) * inv_denom_y ) % _q
+    return (x3, y3)
+
+def _scalar_mult(P, e: int):
+    if e == 0:
+        return (0, 1)
+    Q = _scalar_mult(P, e // 2)
+    Q = _edwards_add(Q, Q)
+    if e & 1:
+        Q = _edwards_add(Q, P)
+    return Q
+
+def _point_compress(P):
+    x, y = P
+    y_bytes = y.to_bytes(32, "little")
+    x_bit = x & 1
+    y_list = bytearray(y_bytes)
+    y_list[31] |= x_bit << 7
+    return bytes(y_list)
+
+def ed25519_publickey_from_secret(seed32: bytes) -> bytes:
+    h = hashlib.sha512(seed32).digest()
+    a_bytes = bytearray(h[:32])
+    # Clamp:
+    a_bytes[0]  &= 248
+    a_bytes[31] &= 63
+    a_bytes[31] |= 64
+    a = int.from_bytes(a_bytes, "little")
+
+    # Basepoint:
+    B = (_Bx, _By)
+    A = _scalar_mult(B, a)
+    return _point_compress(A)
+
+_b58_alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+def base58_encode(data: bytes) -> str:
+    num = int.from_bytes(data, "big")
+    encode_chars = []
+    while num > 0:
+        num, rem = divmod(num, 58)
+        encode_chars.append(_b58_alphabet[rem])
+    n_pad = 0
+    for c in data:
+        if c == 0:
+            n_pad += 1
+        else:
+            break
+    return ( _b58_alphabet[0:1] * n_pad + bytes(reversed(encode_chars)) ).decode("ascii")
+
+def derive_solana_keypair_from_mnemonic(mnemonic: str, passphrase: str = "", path_indices = [44, 501, 0, 0]) -> (str, str):
+    seed_bytes = mnemonic_to_seed(mnemonic, passphrase)  # 64 bytes
+    sk_master, cc_master = slip10_derive_master_key(seed_bytes)
+    sk, cc = sk_master, cc_master
+    for idx in path_indices:
+        sk, cc = slip10_derive_child(sk, cc, idx)
+    privkey_seed = sk
+    pubkey_bytes = ed25519_publickey_from_secret(privkey_seed)  # 32 bytes
+    priv_key_expanded = privkey_seed + pubkey_bytes  # 64 bytes, if you want the full keypair
+    pubkey_b58 = base58_encode(pubkey_bytes)
+
+    return priv_key_expanded.hex(), pubkey_b58
 
 global OUTPUT_SEED_LANG
 OUTPUT_SEED_LANG = 'english'
@@ -29,11 +150,11 @@ def idxs2eng    (idxs,wdl) : return ' '.join(wdl[i] for i in idxs)
 def bits2idxs   (bits    ) : return [int(bits[i:i+11], 2) for i in range(0, len(bits), 11)]
 def checksum    (i,     n) : return hex2bin(hashlib.sha256((i%2**n).to_bytes(n//8, byteorder='big')).hexdigest(), 256)[:n//32]  #bip-39
 def ient2idxs   (i,     n) : return bits2idxs(int2bin(i%2**n,n)+checksum(i%2**n,n))
-def getwordlist (        ) : return mnemonic.Mnemonic(OUTPUT_SEED_LANG).wordlist
+def getwordlist (        ) : return Mnemonic(OUTPUT_SEED_LANG).wordlist
 def int2seedphs (i,     n) : return idxs2eng(ient2idxs(i%2**n,n), getwordlist())
-def int2b58     (i       ) : return base58.b58encode_int(i).decode('utf-8')
-def int2b36     (i       ) : return base36.dumps(i).upper()
-def strhash2b58 (s       ) : return int2b58(sha256i(s))
+def int2b58     (i,     n) : return base58_encode(i.to_bytes(n//8, byteorder='big'))
+def int2b36     (i       ) : return '0' if i == 0 else int2b36(i // 36).lstrip('0') + '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i % 36]
+def strhash2b58 (s       ) : return int2b58(sha256i(s), 256)
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
 def dedup       (s       ) : return (lambda x=set(): ''.join(c for c in s if not (c in x or x.add(c))))()
 
@@ -44,14 +165,14 @@ def get256randnum():
 
 def seed2entropy(words, n, lang):
     n_words = len(words)
-    mw = mnemonic.Mnemonic(lang)
+    mw = Mnemonic(lang)
     i_words = from2048(wd2idxs(words, mw.wordlist))
     i_ent = i_words >> (n_words * 11 - n)  # remove checksum
     ent = int2bin(i_ent, n)
     return ent
 
 def genseed(words, s='', additional_int=0, n=256, lang='chinese_simplified', use23wordsonly=False):
-    mw = mnemonic.Mnemonic(lang)
+    mw = Mnemonic(lang)
     i_words = from2048(wd2idxs(words, mw.wordlist))
     i_words = i_words >> 8  # ">>8" remove part of the last word - only 3 bits needed for 256bit entropy
     i_hash  = (sha256i(s) if s else 0)
@@ -142,6 +263,17 @@ def cli_draw_16x16(bitstring):
         print(line)
     print("-"*32)
 
+def cli_get_solana_addr(seed_phrases, passphrase):
+    priv_hex, sol_address = derive_solana_keypair_from_mnemonic(seed_phrases, passphrase, [44, 501, 0, 0])
+    print(f'==================================')
+    print(f'|Address with ' + (f'Passphrase {passphrase}|' if passphrase else 'No passphrase -----|'))
+    generate_qrcode(sol_address)
+    print(f'Solana Address: {sol_address}')
+    print('====== Check Balance on Solscan ======')
+    solscan_addr = f'solscan.io/account/{sol_address}'
+    generate_qrcode(solscan_addr)
+    print(solscan_addr)
+
 def main_cli(interactive=False):
     if '-h' in sys.argv or '--help' in sys.argv:
         print(f'Usage:\npython3 {__file__.split(r"/")[-1]} "YourWords" "YourPasscode" "RawBits(upto 256bits)" "nbits", "LanguageOfWords"')
@@ -161,7 +293,7 @@ def main_cli(interactive=False):
         nbit = int(nbit) if nbit else 256
         lang = lang.lower() if lang else 'chinese_simplified'
         words = words if lang.startswith('chinese') else words.split(' ')
-        words_eff = wd2effwd(words, mnemonic.Mnemonic(lang).wordlist)
+        words_eff = wd2effwd(words, Mnemonic(lang).wordlist)
         print( "---> INPUT:", ' '.join(words_eff), passcode, bit_string, nbit, lang)
         seed_phrases_old = genseed(words, passcode, image_int, nbit, lang, True )
         seed_phrases_new = genseed(words, passcode, image_int, nbit, lang, False)
@@ -174,6 +306,7 @@ def main_cli(interactive=False):
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
         pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
         print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp}")
+        cli_get_solana_addr(seed_phrases_new, splitstr(pass_hash_b58, 8)[0])
 
 def main_ui():
     import tkinter as tk
@@ -277,7 +410,7 @@ def main_ui():
             words = words.replace(c, ' ')
         words = words.replace('  ', ' ').replace('  ', ' ')
         words = words if lang.startswith('chinese') else words.split(' ')
-        words_eff = wd2effwd(words, mnemonic.Mnemonic(lang).wordlist)
+        words_eff = wd2effwd(words, Mnemonic(lang).wordlist)
         passcode = passcode_str_raw.strip()
         nbit = {12:128, 23:256, 24:256}[int(seed_length)]
 
