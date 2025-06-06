@@ -532,10 +532,7 @@ if __name__ == "__main__":
                     return MainUI()
             
             MyApp().run()
-        except Exception as e:
-            import traceback
-            print(f'{e}')
-            traceback.print_exc()
-            #main_cli(True)
+        except:
+            main_cli(True)
 
 
