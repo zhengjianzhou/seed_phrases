@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 ### To make it a runnable file on Mac / Windows using pyinstaller
-# pip3 install mnemonic qrcode pillow pyinstaller
+# pip3 install mnemonic qrcode pillow kivy pyinstaller
 # pyinstaller --onefile --windowed --icon=icon.icns --add-data "semaj_seed_phrase_generator.py:." semaj_seed_phrase_generator.py
 
 import sys, os, math
@@ -131,6 +131,7 @@ def derive_solana_keypair_from_mnemonic(mnemonic: str, passphrase: str = "", pat
 
 global OUTPUT_SEED_LANG
 OUTPUT_SEED_LANG = 'english'
+LANG_LIST = ('CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN')
 
 THE_SYMBOLS = '─│┌┐└┘├┤┬┴┼╱╲╳╵╷'
 #THE_SYMBOLS = ' ▀▄█▌▐▖▗▘▙▚▛▜▝▞▟'
@@ -309,9 +310,16 @@ def main_cli(interactive=False):
         print( "NEW SEED Entropy ->", seed_ent)
         cli_draw_16x16(seed_ent)
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
-        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
-        print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp}")
-        cli_get_solana_addr(seed_phrases_new, splitstr(pass_hash_b58, 8)[0])
+        pass_hash_b58_sp = splitstr(pass_hash_b58, 8)
+        pass_hash_b58_sp_joined = ' '.join(pass_hash_b58_sp)
+        print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp_joined}")
+        passphrases = input('Please enter 0-5 to show the QRCode for target Solana address (e.g. "0", or "0,1,3", Enter for address with no passphrase):')
+        if passphrases:
+            for p in passphrases.replace(',', ' ').split(' '):
+                if p.isnumeric() and int(p) in range(len(pass_hash_b58_sp)):
+                    cli_get_solana_addr(seed_phrases_new, pass_hash_b58_sp[int(p)])
+        else:
+            cli_get_solana_addr(seed_phrases_new, '')
 
 if __name__ == "__main__":
     if len(sys.argv[1:]) >= 1:
@@ -422,8 +430,8 @@ if __name__ == "__main__":
                     # Options (1/4 of width)
                     options_box = BoxLayout(orientation='vertical')
                     self.nwords_spinner = Spinner(text="24 Words", values=("12 Words", "23 Words(* 24-1)", "24 Words"))
-                    self.ilang_spinner = Spinner(text='CHINESE_SIMPLIFIED', values=('CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN'))
-                    self.olang_spinner = Spinner(text='ENGLISH', values=('CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN'))
+                    self.ilang_spinner = Spinner(text='INPUT: CHINESE_SIMPLIFIED', values=['INPUT: '+l for l in LANG_LIST])
+                    self.olang_spinner = Spinner(text='OUTPUT: ENGLISH', values=['OUTPUT: '+l for l in LANG_LIST])
                     options_box.add_widget(self.nwords_spinner)
                     options_box.add_widget(self.ilang_spinner)
                     options_box.add_widget(self.olang_spinner)
@@ -491,10 +499,10 @@ if __name__ == "__main__":
                     word_input_raw = self.text_phrases.text
                     passcode_str_raw = self.text_passcode.text
                     seed_length = self.nwords_spinner.text.split(' ')[0]
-                    input_lang = self.ilang_spinner.text.lower()
+                    input_lang = self.ilang_spinner.text.lower().split(' ')[-1]
             
                     global OUTPUT_SEED_LANG 
-                    OUTPUT_SEED_LANG = self.olang_spinner.text.lower()
+                    OUTPUT_SEED_LANG = self.olang_spinner.text.lower().split(' ')[-1]
             
                     image_int = int(image_bit,2) if image_bit else 0
             
