@@ -1,9 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-### To make it a runnable file on Mac / Windows using pyinstaller
-# pip3 install mnemonic qrcode pillow pyinstaller
+### requirements.txt
+# pip3 install mnemonic qrcode pillow kivy
+#
+### To make an App on macOS / Windows using pyinstaller
+# pip3 install pyinstaller
 # pyinstaller --onefile --windowed --icon=icon.icns --add-data "semaj_seed_phrase_generator.py:." semaj_seed_phrase_generator.py
+#
+### To use buildozer for android
+### Copy a CJK font from somewhere to current folder as STHeiti.ttc
+### e.g. macOS: cp /System/Library/Fonts/STHeiti\ Light.ttc ./STHeiti.ttc
+# buildozer android debug
+#
+### To use kivy-ios for iOS
+### Copy a CJK font from somewhere to current folder as STHeiti.ttc
+### e.g. macOS: cp /System/Library/Fonts/STHeiti\ Light.ttc ./STHeiti.ttc
+# brew install autoconf automake libtool pkg-config
+# pip install kivy-ios
+# toolchain build python3 kivy
+# more steps on ChatGPT
 
 import sys, os, math
 import hashlib
@@ -131,6 +147,7 @@ def derive_solana_keypair_from_mnemonic(mnemonic: str, passphrase: str = "", pat
 
 global OUTPUT_SEED_LANG
 OUTPUT_SEED_LANG = 'english'
+LANG_LIST = ('CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN')
 
 THE_SYMBOLS = '─│┌┐└┘├┤┬┴┼╱╲╳╵╷'
 #THE_SYMBOLS = ' ▀▄█▌▐▖▗▘▙▚▛▜▝▞▟'
@@ -157,6 +174,11 @@ def int2b36     (i       ) : return '0' if i == 0 else int2b36(i // 36).lstrip('
 def strhash2b58 (s       ) : return int2b58(sha256i(s), 256)
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
 def dedup       (s       ) : return (lambda x=set(): ''.join(c for c in s if not (c in x or x.add(c))))()
+
+def b36_checksum(bitstring):
+    bit_string_b36 = int2b36(sha256i(bitstring)) # use the last 4 b36 as image convert checksum
+    bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
+    return bit_string_b36_checksum 
 
 def get256randnum():
     entropy_bytes = os.urandom(32) # Generate 32 bytes (256 bits) of entropy
@@ -250,8 +272,7 @@ def cli_draw_16x16(bitstring):
     if any(c not in ('0', '1') for c in bitstring):
         raise ValueError("Input string must contain only '0' and '1'.")
 
-    bit_string_b36 = int2b36(sha256i(bitstring)) # use the last 4 b58 as image convert checksum
-    bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
+    bit_string_b36_checksum = b36_checksum(bitstring)
 
     black_block, white_block = '⬛', '⬜'
     print("-"*32)
@@ -295,6 +316,7 @@ def main_cli(interactive=False):
         words = words if lang.startswith('chinese') else words.split(' ')
         words_eff = wd2effwd(words, Mnemonic(lang).wordlist)
         print( "---> INPUT:", ' '.join(words_eff), passcode, bit_string, nbit, lang)
+        print( "BitString Checksum:", b36_checksum(bit_string))
         seed_phrases_old = genseed(words, passcode, image_int, nbit, lang, True )
         seed_phrases_new = genseed(words, passcode, image_int, nbit, lang, False)
         print( "OLD Version->", seed_phrases_old)
@@ -304,291 +326,235 @@ def main_cli(interactive=False):
         print( "NEW SEED Entropy ->", seed_ent)
         cli_draw_16x16(seed_ent)
         pass_hash_b58 = strhash2b58(passcode) if passcode else ''
-        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
-        print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp}")
-        cli_get_solana_addr(seed_phrases_new, splitstr(pass_hash_b58, 8)[0])
-
-def main_ui():
-    import tkinter as tk
-    from tkinter import filedialog
-
-    ### tkinter ui main function
-    CELL_SIZE = 10
-    GRID_SIZE = 16
-    class DrawingPad(tk.Frame):
-        def __init__(self, master=None, saved_after_func=None, **kwargs):
-            super().__init__(master, **kwargs)
-    
-            self.saved_after_func = saved_after_func 
-            self.canvas = tk.Canvas(self, width=CELL_SIZE*GRID_SIZE, height=CELL_SIZE*GRID_SIZE, bg='gray')
-            self.canvas.grid(row=0, column=0, columnspan=2)
-    
-            self.save_button = tk.Button(self, text="Save", command=self.save_image)
-            self.save_button.grid(row=1, column=0, pady=5, sticky="ew")
-    
-            self.clear_button = tk.Button(self, text="Clear", command=self.clear)
-            self.clear_button.grid(row=1, column=1, pady=5, sticky="ew")
-    
-            self.pixels = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-    
-            self.canvas.bind("<B1-Motion>", self.draw)
-            self.canvas.bind("<Button-1>", self.draw)
-            self.canvas.bind("<B3-Motion>", self.erase)
-            self.canvas.bind("<Button-3>", self.erase)
-    
-            self.draw_grid()
-    
-        def draw_grid(self):
-            for i in range(GRID_SIZE):
-                for j in range(GRID_SIZE):
-                    x0 = j * CELL_SIZE
-                    y0 = i * CELL_SIZE
-                    x1 = x0 + CELL_SIZE
-                    y1 = y0 + CELL_SIZE
-                    self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill='black')
-    
-        def draw(self, event):
-            self.set_pixel(event, color="white", value=1)
-    
-        def erase(self, event):
-            self.set_pixel(event, color="black", value=0)
-    
-        def load_all_pixel(self, image_bit_string):
-            self.clear()
-            pixels = [(i%16, i//16, c) for i,c in enumerate(image_bit_string)]
-            for col,row,c in pixels:
-                if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
-                    self.pixels[row][col] = int(c)
-                    x0 = col * CELL_SIZE
-                    y0 = row * CELL_SIZE
-                    x1 = x0 + CELL_SIZE
-                    y1 = y0 + CELL_SIZE
-                    self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=('white' if c=='1' else 'black'))
-            
-        def set_pixel(self, event, color, value):
-            col = event.x // CELL_SIZE
-            row = event.y // CELL_SIZE
-            if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
-                self.pixels[row][col] = value
-                x0 = col * CELL_SIZE
-                y0 = row * CELL_SIZE
-                x1 = x0 + CELL_SIZE
-                y1 = y0 + CELL_SIZE
-                self.canvas.create_rectangle(x0, y0, x1, y1, outline='gray', fill=color)
-    
-        def save_image(self):
-            from PIL import Image
-            filename = os.path.join(os.path.expanduser("~"), "Downloads", "SeedImage_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".png")
-            img = Image.new('1', (GRID_SIZE, GRID_SIZE), color=0)
-            for y in range(GRID_SIZE):
-                for x in range(GRID_SIZE):
-                    if self.pixels[y][x] == 1:
-                        img.putpixel((x, y), 1)
-            img.save(filename)
-            if self.saved_after_func:
-                self.saved_after_func(filename)
-    
-        def clear(self):
-            self.pixels = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-            self.canvas.delete("all")
-            self.draw_grid()
-
-    def set_output_lang(*args, **kwargs):
-        global OUTPUT_SEED_LANG 
-        OUTPUT_SEED_LANG = langOutput_select_entry.get().lower()
-
-    def generate_output():
-        word_input_raw = word_input_entry.get()
-        passcode_str_raw = passcode_entry.get()
-        seed_length = seed_length_entry.get().split(' ')[0]
-        lang = lang_select_entry.get().lower()
-        image_bit = image_bit_text.get("1.0", tk.END).strip()
-        image_int = int(image_bit,2) if image_bit else 0
-
-        words = word_input_raw.strip().replace(',',' ')
-        for c in [chr(i) for i in range(33, 127) if not chr(i).isalpha()]:
-            words = words.replace(c, ' ')
-        words = words.replace('  ', ' ').replace('  ', ' ')
-        words = words if lang.startswith('chinese') else words.split(' ')
-        words_eff = wd2effwd(words, Mnemonic(lang).wordlist)
-        passcode = passcode_str_raw.strip()
-        nbit = {12:128, 23:256, 24:256}[int(seed_length)]
-
-        if int(seed_length) == 23:
-            seed_phrases = genseed(words, passcode, image_int, nbit, lang, True)
+        pass_hash_b58_sp = splitstr(pass_hash_b58, 8)
+        pass_hash_b58_sp_joined = ' '.join(pass_hash_b58_sp)
+        print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp_joined}")
+        passphrases = input('Please enter 0-5 to show the QRCode for target Solana address (e.g. "0", or "0,1,3", Enter for address with no passphrase):')
+        if passphrases:
+            for p in passphrases.replace(',', ' ').split(' '):
+                if p.isnumeric() and int(p) in range(len(pass_hash_b58_sp)):
+                    cli_get_solana_addr(seed_phrases_new, pass_hash_b58_sp[int(p)])
         else:
-            seed_phrases = genseed(words, passcode, image_int, nbit, lang, False)
-
-        pass_hash_b58 = strhash2b58(passcode) if passcode else ''
-        pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
-        indexed_seed_phrases = dict([(i+1, s) for i, s in enumerate(seed_phrases.split(' '))])
-
-        eff_entropy = seed2entropy(seed_phrases.split(' '), nbit, OUTPUT_SEED_LANG)
-    
-        output1.config(state="normal")
-        outputE.config(state="normal")
-        output2.config(state="normal")
-        output3.config(state="normal")
-        output4.config(state="normal")
-
-        output1.delete(1.0, tk.END)
-        outputE.delete(1.0, tk.END)
-        output2.delete(1.0, tk.END)
-        output3.delete(1.0, tk.END)
-        output4.delete(1.0, tk.END)
-    
-        output1.insert(tk.END, f"{' '.join(words_eff)}")
-        outputE.insert(tk.END, f"{eff_entropy}")
-        output2.insert(tk.END, f"{seed_phrases}")
-        output3.insert(tk.END, f"{indexed_seed_phrases}")
-        output4.insert(tk.END, f"{pass_hash_b58_sp}")
-
-        output1.config(state="disabled")
-        outputE.config(state="disabled")
-        output2.config(state="disabled")
-        output3.config(state="disabled")
-        output4.config(state="disabled")
-
-    def update_image_block(bit_string):
-        image_bit_text.config(state="normal")
-        image_bit_text.delete('1.0', tk.END)
-        image_bit_text.insert(tk.END, bit_string.zfill(256))
-        image_bit_text.config(state="disabled")
-        image_hex_text.config(state="normal")
-        image_hex_text.delete('1.0', tk.END)
-        hex_string = hex(int(bit_string,2) if bit_string else 0)[2:].zfill(64).upper()
-        image_hex_text.insert(tk.END, hex2line(hex_string))
-        image_hex_text.config(state="disabled")
-        pad.load_all_pixel(bit_string)
-
-    def update_checksum(bit_string):
-        bit_string_b36 = int2b36(sha256i(bit_string)) # use the last 4 b58 as image convert checksum
-        bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
-        checksum_label.config(text=f"Checksum: {bit_string_b36_checksum}")
-
-    def load_and_process_image(file_path=None):
-        if not file_path:
-            file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")])
-        if file_path:
-            bit_string = process_image(file_path)
-            path_label.config(text=file_path)
-            update_image_block(bit_string)
-            update_checksum(bit_string)
-    
-    def gen_random_image():
-        _, bit_string = get256randnum()
-        update_image_block(bit_string)
-        update_checksum(bit_string)
-
-    def load_and_process_bitstring():
-        bit_string = bit_string_entry.get().strip()
-        ords = [ord(i) for i in bit_string]
-        if min(ords) > 9400 and max(ords) < 9700:
-            hex_string = line2hex(bit_string)
-            bit_string = hex2bin(hex_string, 256)
-        update_image_block(bit_string)
-        update_checksum(bit_string)
-    
-    root = tk.Tk()
-    root.title("Semaj's SeedPhrase Generator")
-    root.grid_columnconfigure(0, weight=1)
-    root.grid_rowconfigure(0, weight=1)
-    
-    seed_length_entry = tk.StringVar(root)
-    seed_length_entry.set("24 Words")
-    lang_select_entry = tk.StringVar(root)
-    lang_select_entry.set("CHINESE_SIMPLIFIED")
-    langOutput_select_entry = tk.StringVar(root)
-    langOutput_select_entry.set("ENGLISH")
-
-    dropdown_group = tk.LabelFrame(root, text="Options", padx=10, pady=5)
-    dropdown_group.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-    dropdown = tk.OptionMenu(dropdown_group, seed_length_entry, "12 Words", "23 Words (24 - but last word ignored)", "24 Words")
-    dropdown.config(font=("Courier", 10))
-    dropdown.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
-    label_lang = tk.Label(dropdown_group, text="Source Text:", font=("Courier", 12), anchor='w')
-    label_lang.grid(          row=0, column=1, sticky="ew", padx=10, pady=0)
-    dropdown_lang = tk.OptionMenu(dropdown_group, lang_select_entry, 'CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN')
-    dropdown_lang.config(font=("Courier", 10))
-    dropdown_lang.grid(row=0, column=2, sticky="ew", padx=10, pady=5)
-    label_langOutput = tk.Label(dropdown_group, text="Output Seed Phrase:", font=("Courier", 12), anchor='w')
-    label_langOutput.grid(          row=0, column=3, sticky="ew", padx=10, pady=0)
-    dropdown_langOutput = tk.OptionMenu(dropdown_group, langOutput_select_entry, 'CHINESE_SIMPLIFIED', 'CHINESE_TRADITIONAL', 'CZECH', 'JAPANESE', 'FRENCH', 'ENGLISH', 'SPANISH', 'ITALIAN', 'PORTUGUESE', 'KOREAN', command=set_output_lang)
-    dropdown_langOutput.config(font=("Courier", 10))
-    dropdown_langOutput.grid(row=0, column=4, sticky="ew", padx=10, pady=5)
-
-    input_group = tk.LabelFrame(root, text="Text Input", padx=10, pady=5)
-    input_group.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
-    input_group.grid_columnconfigure(0, weight=1)
-    label1 = tk.Label(input_group, text="Enter your Source Phrases here:", font=("Courier", 12), anchor='w')
-    word_input_entry = tk.Entry(input_group, font=("Courier", 14))
-    label2 = tk.Label(input_group, text="Enter your Passcode here:", font=("Courier", 12), anchor='w')
-    passcode_entry = tk.Entry(input_group, font=("Courier", 14))
-    label1.grid(          row=0, column=0, sticky="ew", padx=10, pady=0)
-    word_input_entry.grid(row=1, column=0, sticky="ew", padx=10, pady=0)
-    label2.grid(          row=2, column=0, sticky="ew", padx=10, pady=0)
-    passcode_entry.grid(  row=3, column=0, sticky="ew", padx=10, pady=0)
-    
-    image_group = tk.LabelFrame(root, text="Image Input", padx=10, pady=5)
-    image_group.grid(row=3, column=0, columnspan=5, sticky="ew", padx=5, pady=5)
-    image_group.grid_columnconfigure(0, weight=1)
-    pad = DrawingPad(image_group, saved_after_func=load_and_process_image)
-    image_bit_text = tk.Text(image_group, bg="lightgray", width=16, height=16, font=("Courier", 8))
-    image_hex_text = tk.Text(image_group, bg="lightgray", width=8, height=8, font=("Courier", 17))
-    load_bit_button = tk.Button(image_group, text="Load BitString↴", command=load_and_process_bitstring)
-    bit_string_entry = tk.Entry(image_group, width=50, font=("Courier", 10))
-    load_button = tk.Button(image_group, text="Load Image File", command=load_and_process_image)
-    load_randnum_button = tk.Button(image_group, text="Generate Random Image", command=gen_random_image)
-    checksum_label = tk.Label(image_group, text="", font=("Courier", 14))
-    path_label = tk.Label(image_group, text="")
-
-    pad.grid                (row=0, column=0, rowspan=6, columnspan=1, sticky="w",  padx=5, pady=5)
-    image_bit_text.grid     (row=0, column=1, rowspan=6, columnspan=1, sticky="w",  padx=5, pady=5)
-    image_hex_text.grid     (row=0, column=2, rowspan=6, columnspan=1, sticky="w",  padx=5, pady=5)
-    load_bit_button.grid    (row=0, column=3, rowspan=1, columnspan=1, sticky="w",  padx=5, pady=5)
-    bit_string_entry.grid   (row=1, column=3, rowspan=1, columnspan=4, sticky="ew", padx=5, pady=5)
-    load_button.grid        (row=2, column=3, rowspan=1, columnspan=1, sticky="w",  padx=5, pady=5)
-    load_randnum_button.grid(row=3, column=3, rowspan=1, columnspan=4, sticky="w",  padx=5, pady=5)
-    checksum_label.grid     (row=4, column=3, rowspan=1, columnspan=4, sticky="w",  padx=5, pady=5)
-    path_label.grid         (row=5, column=3, rowspan=1, columnspan=4, sticky="w",  padx=5, pady=0)
-
-    generate_button = tk.Button(root, text="Generate Seed Phrases", font=("Courier", 16), command=generate_output)
-    generate_button.grid(row=4, column=0, sticky="ew", padx=10, pady=5)
-    
-    output_group = tk.LabelFrame(root, text="Output", padx=10, pady=5)
-    output_group.grid(row=5, column=0, sticky="ew", padx=5, pady=5)
-    output_group.grid_columnconfigure(0, weight=1)
-    output_group.grid_rowconfigure(0, weight=1)
-    output1 = tk.Text(output_group, bg="lightgray", height=1, wrap="word", font=("Courier", 12))
-    outputE = tk.Text(output_group, bg="lightgray", height=2, wrap="word", font=("Courier", 8))
-    output2 = tk.Text(output_group, bg="lightgray", height=3, wrap="word", font=("Courier", 12))
-    output3 = tk.Text(output_group, bg="lightgray", height=4, wrap="word", font=("Courier", 12))
-    output4 = tk.Text(output_group, bg="lightgray", height=1, wrap="word", font=("Courier", 12))
-    
-    label3 = tk.Label(output_group, text="Your Effective Text Input:", font=("Courier", 12), anchor='w')
-    labelE = tk.Label(output_group, text="Entropy of Your Seed Phrases:", font=("Courier", 12), anchor='w')
-    label4 = tk.Label(output_group, text="Your Seed Phrases - Please keep them secure!", font=("Courier", 12), anchor='w')
-    label5 = tk.Label(output_group, text="Your (Optional) Pass Phrases:", font=("Courier", 12), anchor='w')
-
-    label3.grid (row=0, column=0, sticky="ew", padx=10, pady=2)
-    output1.grid(row=1, column=0, sticky="ew", padx=10, pady=2)
-    labelE.grid (row=2, column=0, sticky="ew", padx=10, pady=2)
-    outputE.grid(row=3, column=0, sticky="ew", padx=10, pady=2)
-    label4.grid (row=4, column=0, sticky="ew", padx=10, pady=2)
-    output2.grid(row=5, column=0, sticky="ew", padx=10, pady=2)
-    output3.grid(row=6, column=0, sticky="ew", padx=10, pady=2)
-    label5.grid (row=7, column=0, sticky="ew", padx=10, pady=2)
-    output4.grid(row=8, column=0, sticky="ew", padx=10, pady=2)
-    
-    #root.geometry("1080x900")
-    root.mainloop()
+            cli_get_solana_addr(seed_phrases_new, '')
 
 if __name__ == "__main__":
     if len(sys.argv[1:]) >= 1:
         main_cli()
     else:
         try:
-            main_ui()
+            import kivy
+            from kivy.app import App
+            from kivy.uix.boxlayout import BoxLayout
+            from kivy.uix.label import Label
+            from kivy.uix.textinput import TextInput
+            from kivy.uix.button import Button
+            from kivy.uix.spinner import Spinner
+            from kivy.graphics import Color, Rectangle
+            from kivy.uix.widget import Widget
+            from kivy.core.window import Window
+            from kivy.properties import StringProperty
+            from kivy.utils import platform
+            Window.clearcolor = (1, 1, 1, 1)  # White background
+            if platform.lower() not in ['android', 'ios']:
+                Window.size = (800, 1140)
+                Window.left = 200
+                Window.top = 0
+            import logging
+            from kivy.logger import Logger
+            from kivy.metrics import dp, sp
+            Logger.setLevel(logging.CRITICAL + 1)
+
+            from kivy.core.text import LabelBase, DEFAULT_FONT # Add code
+            font_path = r'STHeiti.ttc'
+            LabelBase.register(DEFAULT_FONT,font_path)
+            from PIL import Image as PILImage
+            class PixelPad(Widget):
+            
+                bitstring = StringProperty('0' * 256)
+            
+                def __init__(self, **kwargs):
+                    super().__init__(**kwargs)
+                    self.rows = 16
+                    self.cols = 16
+                    self.pixels = [0] * 256
+                    self.bind(pos=self.update_canvas, size=self.update_canvas)
+                    self.bind(bitstring=self.update_from_string)
+            
+                def on_size(self, *args):
+                    self.height = self.width  # Keep square aspect
+            
+                def on_touch_down(self, touch):
+                    self.handle_touch(touch)
+            
+                def on_touch_move(self, touch):
+                    self.handle_touch(touch)
+            
+                def handle_touch(self, touch):
+                    if not self.collide_point(*touch.pos):
+                        return
+                    x, y = touch.pos
+                    i = int((x - self.x) / (self.width / self.cols))
+                    j = int((y - self.y) / (self.height / self.rows))
+                    idx = (15-j) * self.cols + i  # left to right, top to bottom
+                    if 0 <= idx < 256:
+                        self.pixels[idx] = 1 - self.pixels[idx]
+                        self.update_canvas()
+                        self.bitstring = ''.join(str(b) for b in self.pixels)
+            
+                def update_canvas(self, *args):
+                    self.canvas.clear()
+                    with self.canvas:
+                        for j in range(self.rows):
+                            for i in range(self.cols):
+                                idx = j * self.cols + i  # left to right, top to bottom
+                                Color(1, 1, 1) if self.pixels[idx] == 1 else Color(0, 0, 0)
+                                Rectangle(pos=(self.x + i * self.width / self.cols,
+                                               self.y + (15-j) * self.height / self.rows),
+                                          size=(self.width / self.cols, self.height / self.rows))
+            
+                def update_from_string(self, instance, value):
+                    if len(value) == 256:
+                        self.pixels = [int(ch) for ch in value]
+                        self.update_canvas()
+            
+                def save_image(self):
+                    img = PILImage.new('1', (16, 16))
+                    img.putdata(self.pixels)
+                    img.save('pixel_image.png')
+            
+                def load_image(self):
+                    try:
+                        img = PILImage.open('pixel_image.png').convert('1')
+                        data = list(img.getdata())
+                        self.pixels = [0 if pixel == 0 else 1 for pixel in data]
+                        self.bitstring = ''.join(str(b) for b in self.pixels)
+                        self.update_canvas()
+                    except Exception as e:
+                        print("Error loading image:", e)
+            
+                def clear_image(self):
+                    self.pixels = [0] * 256
+                    self.bitstring = '0' * 256
+                    self.update_canvas()
+            
+                def generate_random(self):
+                    random_bits = bin(int.from_bytes(os.urandom(32), 'big'))[2:].zfill(256)
+                    self.bitstring = random_bits
+            
+            class MainUI(BoxLayout):
+                def __init__(self, **kwargs):
+                    super().__init__(orientation='vertical', **kwargs)
+                    root = BoxLayout(orientation='vertical')
+            
+                    # Image Input Section
+                    box_section = BoxLayout(size_hint=(1, None))
+                    box_section.height = Window.width  # Make height equal to width
+                    self.pad = PixelPad()
+                    box_section.add_widget(self.pad)
+                    root.add_widget(box_section)
+                    image_box = BoxLayout(orientation='vertical')
+                    right_panel = BoxLayout(orientation='vertical')
+                    buttons_column = BoxLayout(orientation='horizontal')
+                    buttons_column.add_widget(Button(text='Save', on_press=lambda x: self.pad.save_image()))
+                    buttons_column.add_widget(Button(text='Load', on_press=lambda x: self.pad.load_image()))
+                    buttons_column.add_widget(Button(text='Clear', on_press=lambda x: self.pad.clear_image()))
+                    buttons_column.add_widget(Button(text='Random', on_press=lambda x: self.pad.generate_random()))
+                    right_panel.add_widget(buttons_column)
+                    self.bitstring_input = TextInput(text=self.pad.bitstring, multiline=False)
+                    self.bitstring_input.bind(text=self.on_bitstring_change)
+                    self.pad.bind(bitstring=self.update_textinput_from_pad)
+                    right_panel.add_widget(self.bitstring_input)
+                    image_box.add_widget(right_panel)
+                    root.add_widget(image_box)
+
+                    # Options (1/4 of width)
+                    options_box = BoxLayout(orientation='horizontal')
+                    self.nwords_spinner = Spinner(text="24 Words", values=("12 Words", "23 Words(* 24-1)", "24 Words"))
+                    self.ilang_spinner = Spinner(text='INPUT: CHINESE_SIMPLIFIED', values=['INPUT: '+l for l in LANG_LIST])
+                    self.olang_spinner = Spinner(text='OUTPUT: ENGLISH', values=['OUTPUT: '+l for l in LANG_LIST])
+                    options_box.add_widget(self.nwords_spinner)
+                    options_box.add_widget(self.ilang_spinner)
+                    options_box.add_widget(self.olang_spinner)
+                    root.add_widget(options_box)
+                    # Text Inputs
+                    text_input_box = BoxLayout(orientation='vertical')
+                    self.text_phrases = TextInput(hint_text='Text Phrases', multiline=False, font_name=r"STHeiti.ttc", size_hint_y=None, height=dp(18))
+                    text_input_box.add_widget(self.text_phrases)
+                    self.text_passcode = TextInput(hint_text='Passcode', multiline=False, font_name=r"STHeiti.ttc", size_hint_y=None, height=dp(18))
+                    text_input_box.add_widget(self.text_passcode)
+                    root.add_widget(text_input_box)
+                    root.add_widget(Button(text='Generate Seed Phrases', on_press=self.generate_output))
+            
+                    
+                    # Output Section
+                    self.output0 = TextInput(readonly=True, hint_text='Checksum', multiline=False, size_hint_y=None, height=dp(18))
+                    self.output1 = TextInput(readonly=True, hint_text='Input Text Phrases', multiline=False, font_name=r"STHeiti.ttc", size_hint_y=None, height=dp(18))
+                    self.output2 = TextInput(readonly=True, hint_text='Seed / Entropy', multiline=False, size_hint_y=None, height=dp(18))
+                    self.output3 = TextInput(readonly=True, hint_text='Seed Phrases', multiline=True, font_name=r"STHeiti.ttc", size_hint_y=None, height=dp(50))
+                    self.output4 = TextInput(readonly=True, hint_text='Seed Phrases Indexed', multiline=True, font_name=r"STHeiti.ttc", size_hint_y=None, height=dp(70))
+                    self.output5 = TextInput(readonly=True, hint_text='Pass Phrases', multiline=False, font_name=r"STHeiti.ttc", size_hint_y=None, height=dp(18), halign="center")
+                    root.add_widget(self.output0)
+                    root.add_widget(self.output1)
+                    root.add_widget(self.output2)
+                    root.add_widget(self.output3)
+                    root.add_widget(self.output4)
+                    root.add_widget(self.output5)
+
+                    self.add_widget(root)
+            
+                def on_bitstring_change(self, instance, value):
+                    if len(value) == 256 and set(value).issubset({'0', '1'}):
+                        self.pad.bitstring = value
+            
+                def update_textinput_from_pad(self, instance, value):
+                    self.bitstring_input.text = value
+            
+                def generate_output(self, instance):
+                    image_bit = self.pad.bitstring
+                    word_input_raw = self.text_phrases.text
+                    passcode_str_raw = self.text_passcode.text
+                    seed_length = self.nwords_spinner.text.split(' ')[0]
+                    input_lang = self.ilang_spinner.text.lower().split(' ')[-1]
+            
+                    global OUTPUT_SEED_LANG 
+                    OUTPUT_SEED_LANG = self.olang_spinner.text.lower().split(' ')[-1]
+            
+                    image_int = int(image_bit,2) if image_bit else 0
+            
+                    words = word_input_raw.strip().replace(',',' ')
+                    for c in [chr(i) for i in range(33, 127) if not chr(i).isalpha()]:
+                        words = words.replace(c, ' ')
+                    words = words.replace('  ', ' ').replace('  ', ' ')
+                    words = words if input_lang.startswith('chinese') else words.split(' ')
+                    words_eff = ''.join(wd2effwd(words, Mnemonic(input_lang).wordlist))
+                    passcode = passcode_str_raw.strip()
+                    nbit = {12:128, 23:256, 24:256}[int(seed_length)]
+            
+                    if int(seed_length) == 23:
+                        seed_phrases = genseed(words, passcode, image_int, nbit, input_lang, True)
+                    else:
+                        seed_phrases = genseed(words, passcode, image_int, nbit, input_lang, False)
+            
+                    pass_hash_b58 = strhash2b58(passcode) if passcode else ''
+                    pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
+                    indexed_seed_phrases = dict([(i+1, s) for i, s in enumerate(seed_phrases.split(' '))])
+            
+                    bit_string_b36_checksum = b36_checksum(image_bit)
+                    self.output0.text = "Image Checksum: "+bit_string_b36_checksum
+
+                    self.output1.text = words_eff
+                    eff_entropy = seed2entropy(seed_phrases.split(' '), nbit, OUTPUT_SEED_LANG)
+                    self.output2.text = eff_entropy
+                    self.output3.text = seed_phrases
+                    self.output4.text = f'{indexed_seed_phrases}'
+                    self.output5.text = pass_hash_b58_sp
+
+            class MyApp(App):
+                def build(self):
+                    self.title = "Semaj's Seed Phrase Generator"
+                    return MainUI()
+            
+            MyApp().run()
         except:
             main_cli(True)
 
