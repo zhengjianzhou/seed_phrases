@@ -351,6 +351,7 @@ if __name__ == "__main__":
             from kivy.properties import StringProperty
             from kivy.utils import platform
             Window.clearcolor = (1, 1, 1, 1)  # White background
+            Window.softinput_mode = 'pan'
             if platform.lower() not in ['android', 'ios']:
                 Window.size = (800, 1240)
                 Window.left = 200
