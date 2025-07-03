@@ -18,6 +18,7 @@
 # more steps on ChatGPT
 
 import sys, os, math
+from io import BytesIO
 import hashlib
 import hmac
 import binascii
@@ -287,7 +288,7 @@ def cli_get_solana_addr(seed_phrases, passphrase):
     generate_qrcode(sol_address)
     print(f'Solana Address: {sol_address}')
     print('====== Check Balance on Solscan ======')
-    solscan_addr = f'solscan.io/account/{sol_address}'
+    solscan_addr = f'https://solscan.io/account/{sol_address}'
     generate_qrcode(solscan_addr)
     print(solscan_addr)
 
@@ -343,6 +344,9 @@ if __name__ == "__main__":
             from kivy.uix.boxlayout import BoxLayout
             from kivy.uix.label import Label
             from kivy.uix.textinput import TextInput
+            from kivy.uix.dropdown import DropDown
+            from kivy.uix.gridlayout import GridLayout
+            from kivy.uix.popup import Popup
             from kivy.uix.button import Button
             from kivy.uix.spinner import Spinner
             from kivy.graphics import Color, Rectangle
@@ -350,6 +354,8 @@ if __name__ == "__main__":
             from kivy.core.window import Window
             from kivy.properties import StringProperty
             from kivy.utils import platform
+            from kivy.core.image import Image as CoreImage
+            from kivy.uix.image import Image as KivyImage
             Window.clearcolor = (1, 1, 1, 1)  # White background
             Window.softinput_mode = 'pan'
             if platform.lower() not in ['android', 'ios']:
@@ -368,6 +374,7 @@ if __name__ == "__main__":
             class PixelPad(Widget):
             
                 bitstring = StringProperty('0' * 256)
+                seed_phrases = ''
             
                 def __init__(self, **kwargs):
                     super().__init__(**kwargs)
@@ -480,8 +487,15 @@ if __name__ == "__main__":
                     self.text_passcode = TextInput(hint_text='Passcode', multiline=False, font_name=r"NotoSansCJK.ttc", size_hint_y=None, height=dp(24))
                     text_input_box.add_widget(self.text_passcode)
                     root.add_widget(text_input_box)
-                    root.add_widget(Button(text='Generate Seed Phrases', on_press=self.generate_output))
+                    generate_box = BoxLayout(orientation='horizontal')
+                    generate_box.add_widget(Button(text='Generate Seed Phrases', on_press=self.generate_output))
             
+                    # Dropdown setup
+                    self.dropdown = DropDown()
+                    self.soladdr_select = Button(text='SOL Address')
+                    self.soladdr_select.bind(on_release=self.dropdown.open)
+                    generate_box.add_widget(self.soladdr_select)
+                    root.add_widget(generate_box)
                     
                     # Output Section
                     self.output0 = TextInput(readonly=True, hint_text='Checksum', multiline=False, size_hint_y=None, height=dp(24))
@@ -499,6 +513,54 @@ if __name__ == "__main__":
 
                     self.add_widget(root)
             
+                def generate_options(self, instance, pass_phrases=''):
+                    pass_phrases = 'NO_PASSPHRASE ' + pass_phrases if pass_phrases else 'NO_PASSPHRASE'
+                    self.dropdown.clear_widgets()
+                    self.options = pass_phrases.split(' ')
+                    for opt in self.options:
+                        btn = Button(text=opt, size_hint_y=None, height=44)
+                        btn.bind(on_release=lambda btn: self.option_selected(btn.text))
+                        self.dropdown.add_widget(btn)
+
+                    self.soladdr_select.text = 'SOL Address'
+
+                def option_selected(self, text):
+                    self.soladdr_select.text = text
+                    self.dropdown.dismiss()
+                    self.show_qr_popup('' if text == 'NO_PASSPHRASE' else text)
+
+                def show_qr_popup(self, pass_phrase):
+                    layout = GridLayout(cols=1, padding=10, spacing=10)
+
+                    if self.seed_phrases:
+                        _, sol_address = derive_solana_keypair_from_mnemonic(self.seed_phrases, pass_phrase, [44, 501, 0, 0])
+                        qr1 = self.create_qr_image(sol_address)
+                        solscan_addr = f'https://solscan.io/account/{sol_address}'
+                        qr2 = self.create_qr_image(solscan_addr)
+
+                        layout.add_widget(Label(text=f"Address:\n{sol_address}"))
+                        layout.add_widget(KivyImage(texture=qr1.texture))
+                        layout.add_widget(Label(text=f"Check Balance:\n{solscan_addr}"))
+                        layout.add_widget(KivyImage(texture=qr2.texture))
+
+                        title_msg = f"Solana Address" + (f' with a passphrase: {pass_phrase}' if pass_phrase else ' without a passphrase')
+                        popup = Popup(title=title_msg, content=layout,
+                                      size_hint=(0.85, 0.85))
+                        popup.open()
+
+                def create_qr_image(self, data):
+                    qr = qrcode.QRCode(box_size=20, border=2)
+                    qr.add_data(data)
+                    qr.make(fit=True)
+                    img = qr.make_image(fill_color="black", back_color="white")
+
+                    # Convert PIL image to Kivy Image
+                    buffer = BytesIO()
+                    img.save(buffer, format='PNG')
+                    buffer.seek(0)
+                    core_img = CoreImage(buffer, ext='png')
+                    return core_img
+
                 def on_bitstring_change(self, instance, value):
                     if len(value) == 256 and set(value).issubset({'0', '1'}):
                         self.pad.bitstring = value
@@ -528,23 +590,24 @@ if __name__ == "__main__":
                     nbit = {12:128, 23:256, 24:256}[int(seed_length)]
             
                     if int(seed_length) == 23:
-                        seed_phrases = genseed(words, passcode, image_int, nbit, input_lang, True)
+                        self.seed_phrases = genseed(words, passcode, image_int, nbit, input_lang, True)
                     else:
-                        seed_phrases = genseed(words, passcode, image_int, nbit, input_lang, False)
+                        self.seed_phrases = genseed(words, passcode, image_int, nbit, input_lang, False)
             
                     pass_hash_b58 = strhash2b58(passcode) if passcode else ''
                     pass_hash_b58_sp = ' '.join(splitstr(pass_hash_b58, 8))
-                    indexed_seed_phrases = dict([(i+1, s) for i, s in enumerate(seed_phrases.split(' '))])
+                    indexed_seed_phrases = dict([(i+1, s) for i, s in enumerate(self.seed_phrases.split(' '))])
             
                     bit_string_b36_checksum = b36_checksum(image_bit)
                     self.output0.text = "Image Checksum: "+bit_string_b36_checksum
 
                     self.output1.text = words_eff
-                    eff_entropy = seed2entropy(seed_phrases.split(' '), nbit, OUTPUT_SEED_LANG)
+                    eff_entropy = seed2entropy(self.seed_phrases.split(' '), nbit, OUTPUT_SEED_LANG)
                     self.output2.text = eff_entropy
-                    self.output3.text = seed_phrases
+                    self.output3.text = self.seed_phrases
                     self.output4.text = f'{indexed_seed_phrases}'
                     self.output5.text = pass_hash_b58_sp
+                    self.generate_options(instance, pass_hash_b58_sp)
 
             class MyApp(App):
                 def build(self):
