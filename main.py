@@ -345,7 +345,6 @@ if __name__ == "__main__":
             from kivy.uix.label import Label
             from kivy.uix.textinput import TextInput
             from kivy.uix.dropdown import DropDown
-            from kivy.uix.gridlayout import GridLayout
             from kivy.uix.popup import Popup
             from kivy.uix.button import Button
             from kivy.uix.spinner import Spinner
@@ -530,26 +529,26 @@ if __name__ == "__main__":
                     self.show_qr_popup('' if text == 'NO_PASSPHRASE' else text)
 
                 def show_qr_popup(self, pass_phrase):
-                    layout = GridLayout(cols=1, padding=10, spacing=10)
-
+                    layout = BoxLayout(orientation='vertical')
                     if self.seed_phrases:
                         _, sol_address = derive_solana_keypair_from_mnemonic(self.seed_phrases, pass_phrase, [44, 501, 0, 0])
                         qr1 = self.create_qr_image(sol_address)
-                        solscan_addr = f'https://solscan.io/account/{sol_address}'
+                        solscan_addr = f'https://solscan.io/account/\n{sol_address}'
                         qr2 = self.create_qr_image(solscan_addr)
 
                         layout.add_widget(Label(text=f"Address:\n{sol_address}"))
                         layout.add_widget(KivyImage(texture=qr1.texture))
-                        layout.add_widget(Label(text=f"Check Balance:\n{solscan_addr}"))
+                        url_label = Label(text=f"Check Balance:\n{solscan_addr}")
+                        layout.add_widget(url_label)
                         layout.add_widget(KivyImage(texture=qr2.texture))
 
                         title_msg = f"Solana Address" + (f' with a passphrase: {pass_phrase}' if pass_phrase else ' without a passphrase')
                         popup = Popup(title=title_msg, content=layout,
-                                      size_hint=(0.85, 0.85))
+                                      size_hint=(0.9, 0.9))
                         popup.open()
 
                 def create_qr_image(self, data):
-                    qr = qrcode.QRCode(box_size=20, border=2)
+                    qr = qrcode.QRCode(box_size=40, border=2)
                     qr.add_data(data)
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
