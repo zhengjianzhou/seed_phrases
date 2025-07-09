@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 ### requirements.txt
-# pip3 install mnemonic qrcode pillow kivy
+# pip3 install mnemonic qrcode pillow kivy pynacl
 #
 ### To make an App on macOS / Windows using pyinstaller
 # pip3 install pyinstaller
@@ -26,6 +26,12 @@ import struct
 from mnemonic import Mnemonic
 import qrcode
 from datetime import datetime
+from nacl.signing import SigningKey
+
+DICT_DERIVATIONS = {
+    "Ledger" : "44'/501'/0'",
+    "Phantom" : "44'/501'/0'/0'",
+}
 
 def generate_qrcode(text: str) -> None:
     qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=1, border=1)
@@ -58,10 +64,14 @@ def slip10_derive_master_key(seed: bytes) -> (bytes, bytes):
     I = hmac.new(b"ed25519 seed", seed, hashlib.sha512).digest()
     return I[:32], I[32:]
 
-def slip10_derive_child(parent_key: bytes, parent_chain_code: bytes, index: int) -> (bytes, bytes):
+def slip10_derive_child(parent_key: bytes, parent_pub_key: bytes, parent_chain_code: bytes, index: int, hardened: bool) -> (bytes, bytes):
     assert 0 <= index < 2**31, "Index must be in [0, 2^31)"
-    i_hardened = index + (1 << 31)
-    data = b"\x00" + parent_key + i_hardened.to_bytes(4, "big")
+    if hardened:
+        h_index = index + (1 << 31)
+        data = b"\x00" + parent_key + h_index.to_bytes(4, "big")
+    else:
+        h_index = index
+        data = parent_pub_key + h_index.to_bytes(4, "big")
     I = hmac.new(parent_chain_code, data, hashlib.sha512).digest()
     return I[:32], I[32:]
 
@@ -129,12 +139,18 @@ def base58_encode(data: bytes) -> str:
             break
     return ( _b58_alphabet[0:1] * n_pad + bytes(reversed(encode_chars)) ).decode("ascii")
 
-def derive_solana_keypair_from_mnemonic(mnemonic: str, passphrase: str = "", path_indices = [44, 501, 0, 0]) -> (str, str):
+def derive_solana_keypair_from_mnemonic(mnemonic: str, passphrase: str, derivation_path) -> (str, str):
+    # Phantom Default: "44'/501'/0'/0'" ### but Phantom can scan and find Ledger's account, while Ledger will not. Hence default to Ledger's
+    # Ledger Default: "44'/501'/0'/0"
+    # Ledger Default: derivation_path = [(44, True), (501, True), (0, True), (0, False)]
+    p_indices = [(int(i.split("'")[0]), i.endswith("'")) for i in derivation_path.split(r'/')]
     seed_bytes = mnemonic_to_seed(mnemonic, passphrase)  # 64 bytes
     sk_master, cc_master = slip10_derive_master_key(seed_bytes)
     sk, cc = sk_master, cc_master
-    for idx in path_indices:
-        sk, cc = slip10_derive_child(sk, cc, idx)
+    signing_key = SigningKey(sk)
+    parent_pub_key = signing_key.verify_key.encode()
+    for idx, hardened in p_indices:
+        sk, cc = slip10_derive_child(sk, parent_pub_key, cc, idx, hardened)
     privkey_seed = sk
     pubkey_bytes = ed25519_publickey_from_secret(privkey_seed)  # 32 bytes
     priv_key_expanded = privkey_seed + pubkey_bytes  # 64 bytes, if you want the full keypair
@@ -281,8 +297,8 @@ def cli_draw_16x16(bitstring):
         print(line)
     print("-"*32)
 
-def cli_get_solana_addr(seed_phrases, passphrase):
-    priv_hex, sol_address = derive_solana_keypair_from_mnemonic(seed_phrases, passphrase, [44, 501, 0, 0])
+def cli_get_solana_addr(seed_phrases, passphrase, derivation_path):
+    priv_hex, sol_address = derive_solana_keypair_from_mnemonic(seed_phrases, passphrase, derivation_path)
     print(f'==================================')
     print(f'|Address with ' + (f'Passphrase {passphrase}|' if passphrase else 'No passphrase -----|'))
     generate_qrcode(sol_address)
@@ -327,12 +343,14 @@ def main_cli(interactive=False):
         pass_hash_b58_sp_joined = ' '.join(pass_hash_b58_sp)
         print(f"Suggested Passphrase: Passcode.SHA256.Base58: {pass_hash_b58} => {pass_hash_b58_sp_joined}")
         passphrases = input('Please enter 0-5 to show the QRCode for target Solana address (e.g. "0", or "0,1,3", Enter for address with no passphrase):')
+        derivation_path = input("Please enter derivation_path to get Solana address (e.g. Ledger:44'/501'/0' Phantom:44'/501'/0'/0' | Enter for default:Ledger) :")
+        derivation_path = derivation_path if derivation_path else "44'/501'/0'"
         if passphrases:
             for p in passphrases.replace(',', ' ').split(' '):
                 if p.isnumeric() and int(p) in range(len(pass_hash_b58_sp)):
-                    cli_get_solana_addr(seed_phrases_new, pass_hash_b58_sp[int(p)])
+                    cli_get_solana_addr(seed_phrases_new, pass_hash_b58_sp[int(p)], derivation_path)
         else:
-            cli_get_solana_addr(seed_phrases_new, '')
+            cli_get_solana_addr(seed_phrases_new, '', derivation_path)
 
 if __name__ == "__main__":
     if len(sys.argv[1:]) >= 1:
@@ -513,9 +531,10 @@ if __name__ == "__main__":
                     self.add_widget(root)
             
                 def generate_options(self, instance, pass_phrases=''):
-                    pass_phrases = 'NO_PASSPHRASE ' + pass_phrases if pass_phrases else 'NO_PASSPHRASE'
+                    if pass_phrases:
+                        pass_phrases = ' ' + pass_phrases
                     self.dropdown.clear_widgets()
-                    self.options = pass_phrases.split(' ')
+                    self.options =  [i + "|Ledger"  for i in pass_phrases.split(' ')]+[i + "|Phantom" for i in pass_phrases.split(' ')]
                     for opt in self.options:
                         btn = Button(text=opt, size_hint_y=None, height=44)
                         btn.bind(on_release=lambda btn: self.option_selected(btn.text))
@@ -526,12 +545,14 @@ if __name__ == "__main__":
                 def option_selected(self, text):
                     self.soladdr_select.text = text
                     self.dropdown.dismiss()
-                    self.show_qr_popup('' if text == 'NO_PASSPHRASE' else text)
+                    self.show_qr_popup(text)
 
-                def show_qr_popup(self, pass_phrase):
+                def show_qr_popup(self, pass_deriv):
+                    pass_phrase, device = pass_deriv.split('|')
+                    derivation_path = DICT_DERIVATIONS[device]
                     layout = BoxLayout(orientation='vertical')
                     if self.seed_phrases:
-                        _, sol_address = derive_solana_keypair_from_mnemonic(self.seed_phrases, pass_phrase, [44, 501, 0, 0])
+                        _, sol_address = derive_solana_keypair_from_mnemonic(self.seed_phrases, pass_phrase, derivation_path)
                         qr1 = self.create_qr_image(sol_address)
                         solscan_addr = f'https://solscan.io/account/\n{sol_address}'
                         qr2 = self.create_qr_image(solscan_addr)
@@ -542,7 +563,7 @@ if __name__ == "__main__":
                         layout.add_widget(url_label)
                         layout.add_widget(KivyImage(texture=qr2.texture))
 
-                        title_msg = f"Solana Address" + (f' with a passphrase: {pass_phrase}' if pass_phrase else ' without a passphrase')
+                        title_msg = f"Solana Address for {pass_deriv}"
                         popup = Popup(title=title_msg, content=layout,
                                       size_hint=(0.9, 0.9))
                         popup.open()
