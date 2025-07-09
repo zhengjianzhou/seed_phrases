@@ -26,9 +26,9 @@ import struct
 from mnemonic import Mnemonic
 import qrcode
 from datetime import datetime
-from nacl.signing import SigningKey
 
 DICT_DERIVATIONS = {
+    ### Currently only support the hardened deriv path, cos un-hardened path need other libs to support, so keep it simple
     "Ledger" : "44'/501'/0'",
     "Phantom" : "44'/501'/0'/0'",
 }
@@ -64,14 +64,10 @@ def slip10_derive_master_key(seed: bytes) -> (bytes, bytes):
     I = hmac.new(b"ed25519 seed", seed, hashlib.sha512).digest()
     return I[:32], I[32:]
 
-def slip10_derive_child(parent_key: bytes, parent_pub_key: bytes, parent_chain_code: bytes, index: int, hardened: bool) -> (bytes, bytes):
+def slip10_derive_child(parent_key: bytes, parent_chain_code: bytes, index: int) -> (bytes, bytes):
     assert 0 <= index < 2**31, "Index must be in [0, 2^31)"
-    if hardened:
-        h_index = index + (1 << 31)
-        data = b"\x00" + parent_key + h_index.to_bytes(4, "big")
-    else:
-        h_index = index
-        data = parent_pub_key + h_index.to_bytes(4, "big")
+    hardened_index = index + (1 << 31)
+    data = b"\x00" + parent_key + hardened_index.to_bytes(4, "big")
     I = hmac.new(parent_chain_code, data, hashlib.sha512).digest()
     return I[:32], I[32:]
 
@@ -141,16 +137,13 @@ def base58_encode(data: bytes) -> str:
 
 def derive_solana_keypair_from_mnemonic(mnemonic: str, passphrase: str, derivation_path) -> (str, str):
     # Phantom Default: "44'/501'/0'/0'" ### but Phantom can scan and find Ledger's account, while Ledger will not. Hence default to Ledger's
-    # Ledger Default: "44'/501'/0'/0"
-    # Ledger Default: derivation_path = [(44, True), (501, True), (0, True), (0, False)]
-    p_indices = [(int(i.split("'")[0]), i.endswith("'")) for i in derivation_path.split(r'/')]
+    # Ledger Default: "44'/501'/0'"
+    p_indices = [int(i.split("'")[0]) for i in derivation_path.split(r'/')]
     seed_bytes = mnemonic_to_seed(mnemonic, passphrase)  # 64 bytes
     sk_master, cc_master = slip10_derive_master_key(seed_bytes)
     sk, cc = sk_master, cc_master
-    signing_key = SigningKey(sk)
-    parent_pub_key = signing_key.verify_key.encode()
-    for idx, hardened in p_indices:
-        sk, cc = slip10_derive_child(sk, parent_pub_key, cc, idx, hardened)
+    for idx in p_indices:
+        sk, cc = slip10_derive_child(sk, cc, idx)
     privkey_seed = sk
     pubkey_bytes = ed25519_publickey_from_secret(privkey_seed)  # 32 bytes
     priv_key_expanded = privkey_seed + pubkey_bytes  # 64 bytes, if you want the full keypair
