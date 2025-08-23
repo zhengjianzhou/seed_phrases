@@ -552,7 +552,7 @@ if __name__ == "__main__":
 
                         layout.add_widget(Label(text=f"Address:\n{sol_address}"))
                         layout.add_widget(KivyImage(texture=qr1.texture))
-                        url_label = Label(text=f"Check Balance:\n{solscan_addr}")
+                        url_label = Label(text=f"Check Balance On solscan:\nhttps://solscan.io/account/\n{sol_address}")
                         layout.add_widget(url_label)
                         layout.add_widget(KivyImage(texture=qr2.texture))
 
