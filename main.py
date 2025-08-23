@@ -547,7 +547,7 @@ if __name__ == "__main__":
                     if self.seed_phrases:
                         _, sol_address = derive_solana_keypair_from_mnemonic(self.seed_phrases, pass_phrase, derivation_path)
                         qr1 = self.create_qr_image(sol_address)
-                        solscan_addr = f'https://solscan.io/account/\n{sol_address}'
+                        solscan_addr = f'https://solscan.io/account/{sol_address}'
                         qr2 = self.create_qr_image(solscan_addr)
 
                         layout.add_widget(Label(text=f"Address:\n{sol_address}"))
