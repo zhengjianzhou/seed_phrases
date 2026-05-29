@@ -190,7 +190,7 @@ def transfer_sol(to_account, amount_in_sol, priv_key_b58):
     max_sendable = balance - fee
     if max_sendable <= 0: raise Exception("Insufficient balance for fee")
 
-    requested_lamports = int(REQUESTED_AMOUNT_SOL * LAMPORTS_PER_SOL)
+    requested_lamports = int(float(amount_in_sol) * LAMPORTS_PER_SOL)
     print("[6/7] Determining transfer amount...")
     if requested_lamports >= max_sendable:
         send_amount = max_sendable
@@ -230,7 +230,7 @@ if __name__ == "__main__":
         PRIVATE_KEY_B58 = process_to_keypairs(user_input, {"LEDGER": "m/44'/501'/0'"})["LEDGER"]
         print("\n" + "+"*60)
         TO_ADDRESS = input('Enter the TARGET SOLANA-ADDRESS :\n').strip()
-        REQUESTED_AMOUNT_SOL = input('Enter the AMOUNT in SOL :\n').strip()
+        REQUESTED_AMOUNT_SOL = float(input('Enter the AMOUNT in SOL :\n').strip())
         yes_or_no = input(f"Transferring {REQUESTED_AMOUNT_SOL} SOL to Address: {TO_ADDRESS}\n!!! This step CANNOT be undone, PLEASE double check before proceed !!!\nPlease type 'yes' to continue: ").strip()
  
         if yes_or_no == "yes":
