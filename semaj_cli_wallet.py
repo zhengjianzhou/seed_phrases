@@ -39,7 +39,8 @@ def int2b36     (i       ) : return '0' if i == 0 else int2b36(i // 36).lstrip('
 def strhash2b58 (s       ) : return int2b58(sha256i(s), 256)
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
 def dedup       (s       ) : return (lambda x=set(): ''.join(c for c in s if not (c in x or x.add(c))))()
-def cn2int      (cn      ): return from2048(wd2idxs(cn, Mnemonic('chinese_simplified').wordlist))
+def cn2int      (cn      ) : return from2048(wd2idxs(cn, Mnemonic('chinese_simplified').wordlist))
+def xyz         (x,   *yz) : return (cn2int(x)>>8) + sum([sha256i(i) for i in yz]) 
 
 def print_qr_terminal(*strings):
     # Filter out empty inputs
@@ -259,5 +260,3 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         exit(0)
 
-### eval example
-#! (cn2int("爱在人海")>>8) + sha256i("ABC") ###etc. +{whatever number you want it to be!}
