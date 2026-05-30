@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 #
 # A helper CLI tool to generate a solana address - Semaj.Gnehz 2026/05/29
+# pip3 install qrcode solders mnemonic solana base58 chinese_converter
 #
 import io
 import os
@@ -17,6 +18,7 @@ from solders.message import MessageV0
 from solders.transaction import VersionedTransaction
 from solana.rpc.types import TxOpts
 from base58 import b58decode
+from chinese_converter import to_simplified
 
 RPC_URL = "https://api.mainnet-beta.solana.com"
 LAMPORTS_PER_SOL = 1_000_000_000
@@ -40,7 +42,13 @@ def strhash2b58 (s       ) : return int2b58(sha256i(s), 256)
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
 def dedup       (s       ) : return (lambda x=set(): ''.join(c for c in s if not (c in x or x.add(c))))()
 def cn2int      (cn      ) : return from2048(wd2idxs(cn, Mnemonic('chinese_simplified').wordlist))
-def xyz         (x,   *yz) : return (cn2int(x)>>8) + sum([sha256i(i) for i in yz]) 
+def iscn        (s       ) : return any('\u4e00' <= c <= '\u9fff' for c in str(s))
+def xyz         (      *x) : return sum([(cn2int(to_simplified(s))>>8) if iscn(s) else sha256i(s) for s in x]) 
+
+def b36_checksum(bitstring):
+    bit_string_b36 = int2b36(sha256i(bitstring)) # use the last 4 b36 as image convert checksum
+    bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
+    return bit_string_b36_checksum 
 
 def print_qr_terminal(*strings):
     # Filter out empty inputs
@@ -120,8 +128,10 @@ def process_to_keypairs(user_input, derivation_paths={"LEDGER": "m/44'/501'/0'",
     """Parses inputs, converts binary entropy to mnemonics, and derives keys."""
     cleaned_input = str(user_input).strip()
     if cleaned_input.startswith('#!'):
-        cleaned_input = str(eval(cleaned_input[2:]))
+        cleaned_input_int = eval(cleaned_input[2:])
+        cleaned_input = str(cleaned_input_int)
         print(f"💡 Evaluated Input : {cleaned_input}")
+        print(f"💡 --> b36 Checksum:{b36_checksum(int2bin(cleaned_input_int, 256))}")
     if cleaned_input.isdigit():
         cleaned_input = int2seedphs(int(cleaned_input), 256)
         print(f"💡 Translated Into Seed Phrases : {cleaned_input}")
