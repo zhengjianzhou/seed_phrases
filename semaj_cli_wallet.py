@@ -45,6 +45,21 @@ def cn2int      (cn      ) : return from2048(wd2idxs(cn, Mnemonic('chinese_simpl
 def iscn        (s       ) : return any('\u4e00' <= c <= '\u9fff' for c in str(s))
 def xyz         (      *x) : return sum([(cn2int(to_simplified(s))>>8) if iscn(s) else sha256i(s) for s in x]) 
 
+def base58_encode(data: bytes) -> str:
+    _b58_alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    num = int.from_bytes(data, "big")
+    encode_chars = []
+    while num > 0:
+        num, rem = divmod(num, 58)
+        encode_chars.append(_b58_alphabet[rem])
+    n_pad = 0
+    for c in data:
+        if c == 0:
+            n_pad += 1
+        else:
+            break
+    return ( _b58_alphabet[0:1] * n_pad + bytes(reversed(encode_chars)) ).decode("ascii")
+
 def b36_checksum(bitstring):
     bit_string_b36 = int2b36(sha256i(bitstring)) # use the last 4 b36 as image convert checksum
     bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
@@ -133,8 +148,9 @@ def process_to_keypairs(user_input, derivation_paths={"LEDGER": "m/44'/501'/0'",
         print(f"💡 Evaluated Input : {cleaned_input}")
         print(f"💡 --> b36 Checksum:{b36_checksum(int2bin(cleaned_input_int, 256))}")
     if cleaned_input.isdigit():
+        cleaned_input_b58 = int2b58(int(cleaned_input), 256)
         cleaned_input = int2seedphs(int(cleaned_input), 256)
-        print(f"💡 Translated Into Seed Phrases : {cleaned_input}")
+        print(f"💡 Input as b58: {cleaned_input_b58}\nTranslated Into Seed Phrases : {cleaned_input}")
     mnemo = Mnemonic("english")
 
     try:
