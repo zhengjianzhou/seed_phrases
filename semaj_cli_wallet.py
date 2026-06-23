@@ -36,7 +36,7 @@ def checksum    (i,     n) : return hex2bin(hashlib.sha256((i%2**n).to_bytes(n//
 def ient2idxs   (i,     n) : return bits2idxs(int2bin(i%2**n,n)+checksum(i%2**n,n))
 def getwordlist (        ) : return Mnemonic("english").wordlist
 def int2seedphs (i,     n) : return idxs2eng(ient2idxs(i%2**n,n), getwordlist())
-def int2b58     (i,     n) : return base58_encode(i.to_bytes(n//8, byteorder='big'))
+def int2b58     (i,     n) : return base58_encode((i%2**n).to_bytes(n//8, byteorder='big'))
 def int2b36     (i       ) : return '0' if i == 0 else int2b36(i // 36).lstrip('0') + '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'[i % 36]
 def strhash2b58 (s       ) : return int2b58(sha256i(s), 256)
 def splitstr    (s,     n) : return [s[i*n:(i+1)*n] for i in range(len(s)//n + 1)]
