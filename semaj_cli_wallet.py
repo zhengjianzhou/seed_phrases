@@ -10,7 +10,9 @@ import sys
 import time
 import hashlib
 import qrcode
+import base64
 from base58 import b58decode
+from getpass import getpass
 from chinese_converter import to_simplified
 from mnemonic import Mnemonic
 from solana.rpc.types import TokenAccountOpts
@@ -31,12 +33,21 @@ from spl.token.instructions import (
 
 # Hardcoded Known Token Registry
 KNOWN_TOKEN_DICT = {
-    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC",
-    "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij": "CBBTC",
-    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": "USDT",
-    "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn": "JitoSOL",
-    "So11111111111111111111111111111111111111112": "WSOL",
+    ### TOKEN ADDESS : NAME len() MUST BE <= 20 & USE UPPER CASE ONLY
+    "So11111111111111111111111111111111111111112"  : "WSOL",
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" : "USDC",
+    "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij"  : "CBBTC",
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" : "USDT",
+    "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn" : "JITOSOL",
+    "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"  : "JUP",
+    "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"  : "PUMP",
+    "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R" : "RAY",
+    "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3" : "PYTH",
+    "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" : "WBTC",
+    "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" : "WETH",
+    "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN" : "TRUMP",
 }
+KNOWN_TOKEN_DICT_REVERSE = {v.upper(): k for k, v in KNOWN_TOKEN_DICT.items()}
 
 USE_MINIMAL_FEE = True
 
@@ -64,6 +75,14 @@ def dedup       (s       ) : return (lambda x=set(): ''.join(c for c in s if not
 def cn2int      (cn      ) : return from2048(wd2idxs(cn, Mnemonic('chinese_simplified').wordlist))
 def iscn        (s       ) : return any('\u4e00' <= c <= '\u9fff' for c in str(s))
 def xyz         (      *x) : return sum([(cn2int(to_simplified(s))>>8) if iscn(s) else sha256i(s) for s in x]) 
+
+def seed2int(words, lang='english'):
+    n_words = len(words)
+    n = {12:128, 24:256}[n_words]
+    mw = Mnemonic(lang)
+    i_words = from2048(wd2idxs(words, mw.wordlist))
+    i_ent = i_words >> (n_words * 11 - n)  # remove checksum
+    return i_ent
 
 def base58_encode(data: bytes) -> str:
     _b58_alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -147,6 +166,208 @@ def print_qr_terminal(*strings):
                 print(line)
         print(strings[1])
 
+def derive_key(passcode: str, salt: bytes) -> bytes:
+    """Uses Argon2id to securely derive a 256-bit AES key."""
+    from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+    kdf = Argon2id(
+        salt=salt,
+        length=32,
+        iterations=3,
+        lanes=4,
+        memory_cost=65536
+    )
+    return kdf.derive(passcode.encode())
+
+def encrypt_workflow():
+    """Prompts for input, encrypts it, and displays a compact text-based QR code."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    plain_text = input("Enter text to encrypt: ").strip()
+    if not plain_text:
+        print("Error: Input text cannot be empty.")
+        sys.exit(1)
+        
+    passcode = getpass("Enter a strong passcode (hidden typing): ")
+
+    # Generate cryptographically secure random values
+    salt = os.urandom(16)   
+    nonce = os.urandom(12)  
+
+    # Encrypt via authenticated AES-GCM
+    key = derive_key(passcode, salt)
+    aesgcm = AESGCM(key)
+    ciphertext = aesgcm.encrypt(nonce, plain_text.encode(), None)
+    
+    # Bundle into a single payload string
+    payload = f"{base64.b64encode(salt).decode()}.{base64.b64encode(nonce).decode()}.{base64.b64encode(ciphertext).decode()}"
+    payload = f"#!decrypt(\"{payload}\")"
+    print("\n=== Encryption Successful ===")
+    print("Secure Payload String:")
+    print(payload)
+    
+    # --- Compact QR Code Addon ---
+    print("\nScan this QR Code to read the encrypted payload:")
+    
+    # Minimized border to 1 block for extra space savings
+    qr = qrcode.QRCode(version=1, box_size=1, border=1)
+    qr.add_data(payload)
+    qr.make(fit=True)
+    
+    # CRITICAL: Using 'print_ascii(invert=True)' prints ultra-compact half-blocks
+    # This shrinks the height by 50% so it easily fits the command prompt window
+    qr.print_ascii(invert=True)
+
+    print("") # Empty spacer line
+    save_choice = input("Would you like to generate a QR PNG file? (y/n): ").strip().lower()
+
+    if save_choice in ['y', 'yes']:
+        filename = "qr_payload.png"
+
+        # Re-generate with a larger box_size for a clean, crisp PNG image
+        img_qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        img_qr.add_data(payload)
+        img_qr.make(fit=True)
+
+        # Create and write image to disk
+        qr_image = img_qr.make_image(fill_color="black", back_color="white")
+        qr_image.save(filename)
+        print(f"Success! High-resolution QR code saved as: {os.path.abspath(filename)}")
+    else:
+        print("Skipped PNG image generation.")
+
+def decrypt(payload: str):
+    """Unbundles the components, prompts for password, and decrypts."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    try:
+        salt_b64, nonce_b64, cipher_b64 = payload.split(".", 2)
+        salt = base64.b64decode(salt_b64)
+        nonce = base64.b64decode(nonce_b64)
+        ciphertext = base64.b64decode(cipher_b64)
+    except Exception:
+        print("Error: Invalid payload format.")
+        sys.exit(1)
+        
+    passcode = getpass("Enter the decryption password (hidden typing): ")
+    
+    try:
+        key = derive_key(passcode, salt)
+        aesgcm = AESGCM(key)
+        decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+        
+        msg = decrypted_bytes.decode('utf-8')
+        print("\n=== Decryption Successful ===")
+        print(f"Decrypted Message: {msg[:4]}...")
+        return msg
+        
+    except Exception:
+        print("\nError: Decryption failed. Incorrect password or tampered payload.")
+        sys.exit(1)
+
+def get_camera_index():
+    """
+    Scans indexes 0 through 3 to find active cameras on your Mac,
+    then presents an interactive menu to choose which one to use.
+    """
+    import cv2
+    print("\n" + "-" * 50)
+    print(" [Camera Device Scanner]")
+    print(" Checking for connected video devices...")
+    print("-" * 50)
+
+    available_cameras = []
+
+    # Check indexes 0-3 for active cameras
+    for i in range(4):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            # Quick check to ensure a frame can be read
+            ret, _ = cap.read()
+            if ret:
+                available_cameras.append(i)
+            cap.release()
+
+    if not available_cameras:
+        print("[!] No working video cameras found on this system.")
+        return 0 # Fallback to default index 0
+
+    if len(available_cameras) == 1:
+        # Only one camera found, use it automatically without prompting
+        return available_cameras[0]
+
+    # Multiple cameras found (e.g., MacBook Webcam and iPhone Continuity Camera)
+    print("\n Multiple cameras found! Please select one:")
+    for idx, cam_id in enumerate(available_cameras):
+        # A simple fallback name label since OpenCV raw bindings don't expose system device strings easily
+        device_label = "Primary/Built-in Webcam" if cam_id == 0 else f"Secondary/iPhone Camera (Device #{cam_id})"
+        print(f"  {idx + 1}. {device_label}")
+
+    while True:
+        try:
+            choice = input(f"\nSelect a camera option (1-{len(available_cameras)}): ").strip()
+            choice_idx = int(choice) - 1
+            if 0 <= choice_idx < len(available_cameras):
+                selected_index = available_cameras[choice_idx]
+                print(f"[✓] Initializing device index #{selected_index}...")
+                return selected_index
+        except ValueError:
+            pass
+        print(f"[!] Invalid selection. Please choose a number between 1 and {len(available_cameras)}.")
+
+def scan_qr_from_camera():
+    """
+    Detects available cameras, lets the user select one, and scans for a QR code.
+    """
+    # 1. Ask user to pick which camera to use
+    import cv2
+    camera_idx = get_camera_index()
+
+    print("\n" + "=" * 60)
+    print(" [QR Code Scanner Active]")
+    print(" -> A camera window will now open.")
+    print(" -> Hold your QR code up to your selected camera frame.")
+    print(" -> Press the 'q' key on your keyboard to cancel and exit.")
+    print("=" * 60)
+
+    # 2. Open the selected camera device index
+    cap = cv2.VideoCapture(camera_idx)
+
+    qr_detector = cv2.QRCodeDetector()
+    detected_address = None
+
+    if not cap.isOpened():
+        print(f"[!] ERROR: Could not access camera device index {camera_idx}.")
+        print("    Go to System Settings -> Privacy & Security -> Camera")
+        print("    Ensure your Terminal application has camera permissions enabled.")
+        return None
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("[!] Failed to grab camera feed frame.")
+            break
+
+        data, bbox, _ = qr_detector.detectAndDecode(frame)
+        if data:
+            detected_address = data.strip()
+            print(f"\n[✓] QR Code Detected Successfully! Address: {detected_address}")
+            break
+
+        cv2.putText(frame, "Align QR Code Here (Press 'q' to Cancel)", (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        cv2.imshow("Solana CLI - Scan Recipient QR Code", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            print("\n[!] QR Scanning canceled by user.")
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    cv2.waitKey(1)
+
+    return detected_address
+
 def get_solana_balance(pubkey_obj: Pubkey) -> str:
     """Connects to the Solana Mainnet RPC to check a public key balance."""
     try:
@@ -162,15 +383,27 @@ def process_to_keypairs(user_input, derivation_paths={"LEDGER": "m/44'/501'/0'",
     wallet_priv_b58s = {}
     """Parses inputs, converts binary entropy to mnemonics, and derives keys."""
     cleaned_input = str(user_input).strip()
-    if cleaned_input.startswith('#!'):
-        cleaned_input_int = eval(cleaned_input[2:])
+
+    if cleaned_input.startswith('#$'):
+        cleaned_input_int = seed2int(cleaned_input[2:].replace(","," ").replace("  "," ").split(" "))
         cleaned_input = str(cleaned_input_int)
         print(f"💡 Evaluated Input : {cleaned_input}")
         print(f"💡 --> b36 Checksum:{b36_checksum(int2bin(cleaned_input_int, 256))}")
-    if cleaned_input.isdigit():
-        cleaned_input_b58 = int2b58(int(cleaned_input), 256)
-        cleaned_input = int2seedphs(int(cleaned_input), 256)
-        print(f"💡 Input as b58: {cleaned_input_b58}\nTranslated Into Seed Phrases : {cleaned_input}")
+
+    if cleaned_input.startswith('#!'):
+        while cleaned_input.startswith('#!'):
+            cleaned_input_int = eval(cleaned_input[2:])
+            cleaned_input = str(cleaned_input_int)
+        print(f"💡 Evaluated Input : {cleaned_input}")
+        print(f"💡 --> b36 Checksum:{b36_checksum(int2bin(cleaned_input_int, 256))}")
+
+    if not cleaned_input.isdigit(): # upto here all must be digit otherwise hash to int
+        cleaned_input = str(sha256i(cleaned_input))
+
+    cleaned_input_b58 = int2b58(int(cleaned_input), 256)
+    cleaned_input = int2seedphs(int(cleaned_input), 256)
+    print(f"💡 Your Input: {user_input}\nIn b58: {cleaned_input_b58}\nTranslated Into Seed Phrases : {cleaned_input}")
+
     mnemo = Mnemonic("english")
 
     try:
@@ -550,9 +783,23 @@ def main():
     print("        Semaj's SOLANA WALLET INTERACTIVE CLI MANAGER")
     print("=" * 60)
     
+    if len(sys.argv) > 1 and sys.argv[1].upper() == 'ENCRYPT':
+        print("*" * 60)
+        print("        For string encryption only!")
+        print("*" * 60)
+        encrypt_workflow()
+        exit(0)
+
     # 1. Safe credential handling
-    user_input = input('Enter Seed Phrases, An Integer, or #!{input} to eval({input}) :\n')
-    priv_key_b58 = process_to_keypairs(user_input, {"LEDGER": "m/44'/501'/0'"})["LEDGER"]       #  {"LEDGER": "m/44'/501'/0'", "PHANTOM": "m/44'/501'/0'/0'"})
+    user_input_raw = input('Enter An Integer, or "#" for Scanning a QR Code, or #${English words} for Seed Phrases, or #!{input} to eval({input}) :\n')
+    if user_input_raw == "#":
+        user_input = scan_qr_from_camera()
+        if not user_input:
+            print("[!] No QR Code detected!")
+            sys.exit(1)
+    else: 
+        user_input = user_input_raw
+    priv_key_b58 = process_to_keypairs(user_input, {"LEDGER": "m/44'/501'/0'"})["LEDGER"] # {"LEDGER": "m/44'/501'/0'", "PHANTOM": "m/44'/501'/0'/0'"})
     # priv_key_b58 = input('Enter your Base58 Private Key: ').strip()
     if not priv_key_b58:
         print("[!] Private key cannot be empty.")
@@ -563,28 +810,39 @@ def main():
     print(f"[✓] Wallet Loaded: {sender_pubkey}\n")
     
     while True:
-        print("=" * 40)
+        print("\n" + "=" * 50)
         print(" SELECT AN ACTION:")
         print(" 1. List all SPL Token Balances")
-        print(" 2. Transfer SOL")
-        print(" 3. Transfer SPL Tokens")
-        print(" 4. Exit")
-        print("=" * 40)
-        
-        choice = input("Enter option (1-4): ").strip()
-        
+        print(" 2. Transfer SOL [Manual Input]")
+        print(" 3. Transfer SOL [Scan Camera QR Code]")
+        print(" 4. Transfer SPL Tokens [Manual Input]")
+        print(" 5. Transfer SPL Tokens [Scan Camera QR Code]")
+        print(" 0. Exit")
+        print("=" * 50)
+
+        choice = input("Enter option (0-5): ").strip()
+
         if choice == "1":
             list_spl_balances(priv_key_b58)
-            
-        elif choice == "2":
+
+        elif choice in ["2", "3"]:
             print("\n" + "+" * 60)
             print(" INITIATING NATIVE SOL TRANSFER")
             print("+" * 60)
-            target_sol_address = input('Enter the TARGET SOLANA ADDRESS:\n').strip()
+
+            # Dynamic choice evaluation hook handles input routing
+            if choice == "3":
+                target_sol_address = scan_qr_from_camera()
+                if not target_sol_address:
+                    print("[!] No valid address extracted from QR scan. Aborting.")
+                    continue
+            else:
+                target_sol_address = input('Enter the TARGET SOLANA ADDRESS:\n').strip()
+
             if not target_sol_address:
                 print("[!] Target address cannot be empty.")
                 continue
-                
+
             try:
                 requested_amount_sol = float(input('Enter the AMOUNT in SOL:\n').strip())
                 if requested_amount_sol <= 0:
@@ -593,7 +851,7 @@ def main():
             except ValueError:
                 print("[!] Invalid amount entered.")
                 continue
-                
+
             print("\n" + "!" * 60)
             print(f" REVIEW TRANSACTION:")
             print(f"  - Action: Sending SOL")
@@ -611,20 +869,41 @@ def main():
             else:
                 print("Transaction Cancelled!")
                 
-        elif choice == "3":
+        elif choice in ["4", "5"]:
             print("\n" + "+" * 60)
             print(" INITIATING SPL TOKEN TRANSFER")
             print("+" * 60)
-            target_sol_address = input('Enter the RECIPIENT\'s Main SOLANA WALLET ADDRESS:\n').strip()
+
+            # Dynamic choice evaluation hook handles input routing
+            if choice == "5":
+                target_sol_address = scan_qr_from_camera()
+                if not target_sol_address:
+                    print("[!] No valid address extracted from QR scan. Aborting.")
+                    continue
+            else:
+                target_sol_address = input("Enter the RECIPIENT's Main SOLANA WALLET ADDRESS:\n").strip()
+
             if not target_sol_address:
                 print("[!] Target address cannot be empty.")
                 continue
-                
-            token_mint_addr = input('Enter the SPL TOKEN MINT ADDRESS:\n').strip()
-            if not token_mint_addr:
+
+            # Create a user-friendly string for the prompt: "USDC,CBBTC,USDT,JitoSOL,WSOL"
+            known_tokens_prompt = ','.join(KNOWN_TOKEN_DICT_REVERSE.keys())
+
+            token_mint_addr_input = input(f'Enter the SPL TOKEN MINT ADDRESS or Token Name ({known_tokens_prompt}):\n').strip()
+
+            if not token_mint_addr_input:
                 print("[!] Token Mint address cannot be empty.")
                 continue
-                
+
+            # Check if input is likely a shortcut name or a full public key address
+            if len(token_mint_addr_input) <= 20:
+                # Force user input to UPPERCASE to guarantee a match against your keys
+                token_mint_addr = KNOWN_TOKEN_DICT_REVERSE.get(token_mint_addr_input.upper(), token_mint_addr_input)
+            else:
+                # Safely assign the raw address if the string is long (over 20 characters)
+                token_mint_addr = token_mint_addr_input
+
             try:
                 requested_amount_tokens = float(input('Enter the AMOUNT of tokens:\n').strip())
                 if requested_amount_tokens <= 0:
@@ -652,11 +931,11 @@ def main():
             else:
                 print("Transaction Cancelled!")
                 
-        elif choice == "4":
+        elif choice == "0":
             print("\nExiting. Goodbye!")
             break
         else:
-            print("[!] Invalid option selected. Please enter 1, 2, 3, or 4.")
+            print("[!] Invalid option selected. Please enter a choice between 0 and 5.")
 
 if __name__ == "__main__":
     main()
