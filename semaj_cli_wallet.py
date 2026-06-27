@@ -252,7 +252,7 @@ def encrypt_workflow():
     else:
         print("Skipped PNG image generation.")
 
-def decrypt(payload: str):
+def decrypt(payload: str, passcode=None):
     """Unbundles the components, prompts for password, and decrypts."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -265,7 +265,7 @@ def decrypt(payload: str):
         print("Error: Invalid payload format.")
         sys.exit(1)
         
-    passcode = getpass("Enter the decryption password (hidden typing): ")
+    passcode = passcode if passcode != None else getpass("Enter the decryption password (hidden typing): ")
     
     try:
         key = derive_key(passcode, salt)
@@ -614,6 +614,7 @@ def transfer_sol(to_sol_addr, amount_in_sol, sender_pubkey, sender):
     print(f"Signature: {signature}")
     print(f"https://solscan.io/tx/{signature}")
     print("=" * 60)
+    return signature
 
 def transfer_spl_token(to_sol_addr, token_mint_addr, amount, sender_pubkey, sender):
     print("=" * 60 + "\nSolana Token Transfer Script (SPL & Token-2022)\n" + "=" * 60)
@@ -717,8 +718,10 @@ def transfer_spl_token(to_sol_addr, token_mint_addr, amount, sender_pubkey, send
     print(f"Signature: {signature}")
     print(f"https://solscan.io/tx/{signature}") # Also fixed your solscan URL formatting string error here
     print("=" * 60)
+    return signature
 
 def list_spl_balances(sender_pubkey):
+    token_list = []
     print("=" * 60 + "\nSolana Portfolio Inventory (Full Token Balance Scan)\n" + "=" * 60)
 
     # Standardize dictionary keys to lowercase for foolproof comparisons
@@ -740,6 +743,7 @@ def list_spl_balances(sender_pubkey):
         native_sol_lamports = client.get_balance(sender_pubkey).value
         native_sol_balance = native_sol_lamports / LAMPORTS_PER_SOL
         print(f"{'SOL':<12} | {'Native':<12} | {native_sol_balance:<18.6f} | {'N/A (Native Blockchain Currency)'}")
+        token_list.append({"name":'SOL', "mint": 'Native', "balance":native_sol_balance, "type":"Native"})
     except Exception as e:
         print(f"[!] Warning: Failed to parse native SOL tracking data: {e}")
 
@@ -772,6 +776,8 @@ def list_spl_balances(sender_pubkey):
                             token_type = target["label"]
 
                             print(f"{token_name:<12} | {token_type:<12} | {ui_amount:<18.6f} | {mint_addr}")
+                            token_list.append({"name":token_name, "mint": mint_addr, "balance":ui_amount, "type":token_type})
+
                     except Exception:
                         continue
         except Exception as err:
@@ -782,6 +788,7 @@ def list_spl_balances(sender_pubkey):
 
     print("-" * 115)
     print("=" * 60)
+    return token_list
 
 def main():
     print("=" * 60)
