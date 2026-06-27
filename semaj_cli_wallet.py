@@ -54,6 +54,23 @@ USE_MINIMAL_FEE = True
 RPC_URL = "https://api.mainnet-beta.solana.com"
 LAMPORTS_PER_SOL = 1_000_000_000
 
+# ###
+# Wallet Type              Derivation Path Format          Default First Account
+# Phantom                  m/44'/501'/{index}'/0'          m/44'/501'/0'/0'
+# Ledger                   m/44'/501'/{index}'             m/44'/501'/0'
+# Solflare                 m/44'/501'/{index}'             m/44'/501'/0'
+# Solana CLI (Raw Default) m/44'/501'                      m/44'/501'
+# Solana CLI (With Flag)   m/44'/501'/{index}'/{change}'  m/44'/501'/0'/0'
+
+DERIVATION_PATHS={
+    "SOLANACLI"     : "m/44'/501'",
+    "SOLANACLIFLAG" : "m/44'/501'/{index}'/{change}'",
+    "SOLFLARE"      : "m/44'/501'/{index}'",
+    "LEDGER"        : "m/44'/501'/{index}'",
+    "PHANTOM"       : "m/44'/501'/{index}'/0'",
+    "CUSTOM"        : "m/44'/501'/0'/0'",  # Placeholder for your own type
+}
+
 def int2bin     (i,     n) : return bin(i         )[2:].zfill(n)
 def hex2bin     (h,     n) : return bin(int(h, 16))[2:].zfill(n)
 def to2048      (n       ) : return ([] if n == 0 else to2048(n // 2048) + [n % 2048]) if n else []
@@ -257,7 +274,7 @@ def decrypt(payload: str):
         
         msg = decrypted_bytes.decode('utf-8')
         print("\n=== Decryption Successful ===")
-        print(f"Decrypted Message: {msg[:4]}...")
+        print(f"Decrypted Message: {msg[:3]}...")
         return msg
         
     except Exception:
@@ -379,66 +396,74 @@ def get_solana_balance(pubkey_obj: Pubkey) -> str:
     except Exception as error:
         return f"Error checking balance: {str(error)}"
 
-def process_to_keypairs(user_input, derivation_paths={"LEDGER": "m/44'/501'/0'", "PHANTOM": "m/44'/501'/0'/0'"}):
-    wallet_priv_b58s = {}
+def process_to_keypair(input_raw, wallet_path_name):
     """Parses inputs, converts binary entropy to mnemonics, and derives keys."""
-    cleaned_input = str(user_input).strip()
+    input_refined = str(input_raw).strip()
 
-    if cleaned_input.startswith('#$'):
-        cleaned_input_int = seed2int(cleaned_input[2:].replace(","," ").replace("  "," ").split(" "))
-        cleaned_input = str(cleaned_input_int)
-        print(f"💡 Evaluated Input : {cleaned_input}")
-        print(f"💡 --> b36 Checksum:{b36_checksum(int2bin(cleaned_input_int, 256))}")
+    while input_refined.startswith('#'):
+        if input_refined.startswith('#$'):
+            _step1 = input_refined[2:]
+            _step2 = _step1.replace(","," ").replace("  "," ").replace("  "," ").split(" ")
+            _step3 = seed2int(_step2)
+            input_refined = str(_step3)
 
-    if cleaned_input.startswith('#!'):
-        while cleaned_input.startswith('#!'):
-            cleaned_input_int = eval(cleaned_input[2:])
-            cleaned_input = str(cleaned_input_int)
-        print(f"💡 Evaluated Input : {cleaned_input}")
-        print(f"💡 --> b36 Checksum:{b36_checksum(int2bin(cleaned_input_int, 256))}")
+        if input_refined.startswith('#!'):
+            _step1 = eval(input_refined[2:])
+            input_refined = str(_step1)
 
-    if not cleaned_input.isdigit(): # upto here all must be digit otherwise hash to int
-        cleaned_input = str(sha256i(cleaned_input))
+    if not input_refined.isdigit(): # upto here all must be digit otherwise hash to int
+        input_refined = str(sha256i(input_refined))
 
-    cleaned_input_b58 = int2b58(int(cleaned_input), 256)
-    cleaned_input = int2seedphs(int(cleaned_input), 256)
-    print(f"💡 Your Input: {user_input}\nIn b58: {cleaned_input_b58}\nTranslated Into Seed Phrases : {cleaned_input}")
+    input_int = int(input_refined)
 
-    mnemo = Mnemonic("english")
+    show_secret = False if 'decrypt' in input_raw else True
+    if show_secret:
+        print(f"💡 Evaluated Input : {input_refined}")
+    print(f"💡 --> b36 Checksum:{b36_checksum(int2bin(input_int, 256))}")
+
+    input_b58 = int2b58(int(input_refined), 256)
+    input_seedphrases = int2seedphs(int(input_refined), 256)
+    if show_secret:
+        print(f"💡 Your Input: {input_raw}")
+        print(f"   - In b58: {input_b58}")
+        print(f"   - Translated Into Seed Phrases : {input_seedphrases}")
+
+    e_mnemo = Mnemonic("english")
 
     try:
-        if len(cleaned_input.split()) in [12, 15, 18, 21, 24]:
-            if not mnemo.check(cleaned_input):
+        if len(input_seedphrases.split()) in [12, 15, 18, 21, 24]:
+            if not e_mnemo.check(input_seedphrases):
                 print("❌ Invalid BIP39 mnemonic phrase check failed.")
                 return
-            master_seed = mnemo.to_seed(cleaned_input)
+            master_seed = e_mnemo.to_seed(input_seedphrases)
         else:
             print("❌ Unsupported input string format structure.")
             return
 
-        # 2. DEFINE DERIVATION PATH LAYOUTS
-        for wallet_name, derivation_path in derivation_paths.items():
+        # 2. DEFINE DERIVATION PATH LAYOUTS : _ic for index and change
+        _path_ic = (wallet_path_name+"_0_0").split('_')  # default to use the first wallet - 0
+        derivation_path = DERIVATION_PATHS[_path_ic[0]].replace('{index}', _path_ic[1]).replace('{change}', _path_ic[2])
 
-            # 3. DERIVE KEYPAIRS AND FETCH LIVE BALANCES
-            the_keypair = Keypair.from_seed_and_derivation_path(master_seed, derivation_path)
+        # 3. DERIVE KEYPAIRS AND FETCH LIVE BALANCES
+        the_keypair = Keypair.from_seed_and_derivation_path(master_seed, derivation_path)
 
-            the_pubkey = the_keypair.pubkey()
-            the_priv_b58key = str(the_keypair)
-            wallet_priv_b58s[wallet_name] = the_priv_b58key 
+        the_pubkey = the_keypair.pubkey()
+        the_priv_b58key = str(the_keypair)
 
-            print("⏳ Fetching blockchain balances...")
-            the_balance = get_solana_balance(the_pubkey)
+        print("⏳ Fetching blockchain balances...")
+        the_balance = get_solana_balance(the_pubkey)
 
-            # Display Comprehensive Outputs
-            print("\n" + "="*60)
-            print(f"🔒 {wallet_name} WALLET STRUCTURE")
-            print(f"   Derivation Path : {derivation_path}")
+        # Display Comprehensive Outputs
+        print("\n" + "="*60)
+        print(f"🔒 {wallet_path_name} WALLET STRUCTURE")
+        print(f"   Derivation Path : {derivation_path}")
+        if show_secret:
             print(f"   Private b58 String : {the_priv_b58key}")
-            print(f"   Public Address  : {the_pubkey}")
-            print(f"   Live Balance    : {the_balance}")
-            print("="*60)
-            print_qr_terminal(f"https://solscan.io/account/{the_pubkey}", the_pubkey)
-        return wallet_priv_b58s
+        print(f"   Public Address  : {the_pubkey}")
+        print(f"   Live Balance    : {the_balance}")
+        print("="*60)
+        print_qr_terminal(f"https://solscan.io/account/{the_pubkey}", the_pubkey)
+        return the_priv_b58key 
 
     except Exception as e:
         print(f"❌ Cryptographic processing failure: {str(e)}")
@@ -790,16 +815,23 @@ def main():
         encrypt_workflow()
         exit(0)
 
+    user_derive_path = None
+    if len(sys.argv) > 1 and 'path=' in sys.argv[1]:
+        # NOTE: format : "path=PHANTOM" or "path=PHANTOM_1" for 2nd, _2 for 3rd
+        user_derive_path = sys.argv[1][5:]
+
     # 1. Safe credential handling
     user_input_raw = input('Enter An Integer, or "#" for Scanning a QR Code, or #${English words} for Seed Phrases, or #!{input} to eval({input}) :\n')
     if user_input_raw == "#":
-        user_input = scan_qr_from_camera()
-        if not user_input:
+        input_raw = scan_qr_from_camera()
+        if not input_raw:
             print("[!] No QR Code detected!")
             sys.exit(1)
     else: 
-        user_input = user_input_raw
-    priv_key_b58 = process_to_keypairs(user_input, {"LEDGER": "m/44'/501'/0'"})["LEDGER"] # {"LEDGER": "m/44'/501'/0'", "PHANTOM": "m/44'/501'/0'/0'"})
+        input_raw = user_input_raw
+
+    priv_key_b58 = process_to_keypair(input_raw, user_derive_path or "LEDGER")
+
     # priv_key_b58 = input('Enter your Base58 Private Key: ').strip()
     if not priv_key_b58:
         print("[!] Private key cannot be empty.")
