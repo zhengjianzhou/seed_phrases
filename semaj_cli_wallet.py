@@ -539,7 +539,7 @@ def verify_token_mint(client, token_mint_addr):
         raise Exception(f"Validation Error: Invalid token mint address ({e}).")
 
 
-def transfer_sol(to_sol_addr, amount_in_sol, priv_key_b58):
+def transfer_sol(to_sol_addr, amount_in_sol, sender_pubkey, sender):
     print("=" * 60 + "\nSolana Transfer Script\n" + "=" * 60)
     
     print("[1/7] Connecting RPC...")
@@ -551,8 +551,6 @@ def transfer_sol(to_sol_addr, amount_in_sol, priv_key_b58):
     validated_to_addr = get_valid_recipient_address(client, to_sol_addr)
     
     print("[3/7] Loading wallet...")
-    sender = Keypair.from_bytes(b58decode(priv_key_b58))
-    sender_pubkey = sender.pubkey()
     print(f"      Sender: {sender_pubkey}")
     print(f"      Receiver: {validated_to_addr}")
     
@@ -614,10 +612,10 @@ def transfer_sol(to_sol_addr, amount_in_sol, priv_key_b58):
     
     print("\n|" + "=" * 10 + "\t> TRANSFER SUCCESS!")
     print(f"Signature: {signature}")
-    print(f"https://solscan.io{signature}")
+    print(f"https://solscan.io/tx/{signature}")
     print("=" * 60)
 
-def transfer_spl_token(to_sol_addr, token_mint_addr, amount, priv_key_b58):
+def transfer_spl_token(to_sol_addr, token_mint_addr, amount, sender_pubkey, sender):
     print("=" * 60 + "\nSolana Token Transfer Script (SPL & Token-2022)\n" + "=" * 60)
 
     print("[1/7] Connecting RPC...")
@@ -631,8 +629,6 @@ def transfer_spl_token(to_sol_addr, token_mint_addr, amount, priv_key_b58):
     validated_to_addr = get_valid_recipient_address(client, to_sol_addr)
 
     print("[4/7] Loading wallet configurations...")
-    sender = Keypair.from_bytes(b58decode(priv_key_b58))
-    sender_pubkey = sender.pubkey()
     receiver_pubkey = Pubkey.from_string(validated_to_addr)
 
     program_id = mint_account_info.owner
@@ -719,24 +715,20 @@ def transfer_spl_token(to_sol_addr, token_mint_addr, amount, priv_key_b58):
 
     print("\n|" + "=" * 10 + "\t> TOKEN TRANSFER SUCCESS!")
     print(f"Signature: {signature}")
-    print(f"https://solscan.io{signature}") # Also fixed your solscan URL formatting string error here
+    print(f"https://solscan.io/tx/{signature}") # Also fixed your solscan URL formatting string error here
     print("=" * 60)
 
-def list_spl_balances(priv_key_b58):
+def list_spl_balances(sender_pubkey):
     print("=" * 60 + "\nSolana Portfolio Inventory (Full Token Balance Scan)\n" + "=" * 60)
 
     # Standardize dictionary keys to lowercase for foolproof comparisons
     known_tokens_lower = {mint.lower(): name for mint, name in KNOWN_TOKEN_DICT.items()}
 
-    print("[1/3] Connecting RPC...")
+    print("[1/2] Connecting RPC...")
     client = Client(RPC_URL)
 
-    print("[2/3] Loading wallet information...")
-    sender = Keypair.from_bytes(b58decode(priv_key_b58))
-    sender_pubkey = sender.pubkey()
     print(f"      Wallet: {sender_pubkey}")
-
-    print("[3/3] Scanning decentralized token registries...")
+    print("[2/2] Scanning decentralized token registries...")
 
     # 2. Setup structural grid table layouts
     print("\n" + "-" * 115)
@@ -791,18 +783,6 @@ def list_spl_balances(priv_key_b58):
     print("-" * 115)
     print("=" * 60)
 
-def get_sender_address(priv_key_b58):
-    """Helper to validate key and safely extract sender address before proceeding."""
-    try:
-        decoded = b58decode(priv_key_b58)
-        if len(decoded) != 64:
-            raise ValueError("Invalid private key byte length.")
-        sender = Keypair.from_bytes(decoded)
-        return sender.pubkey()
-    except Exception:
-        print("\n[!] ERROR: Invalid base58 private key provided.")
-        sys.exit(1)
-
 def main():
     print("=" * 60)
     print("        Semaj's SOLANA WALLET INTERACTIVE CLI MANAGER")
@@ -837,8 +817,9 @@ def main():
         print("[!] Private key cannot be empty.")
         sys.exit(1)
         
+    sender = Keypair.from_bytes(b58decode(priv_key_b58))
     # Instantly derive and show address to let user know they logged into the right wallet
-    sender_pubkey = get_sender_address(priv_key_b58)
+    sender_pubkey = sender.pubkey()
     print(f"[✓] Wallet Loaded: {sender_pubkey}\n")
     
     while True:
@@ -855,7 +836,7 @@ def main():
         choice = input("Enter option (0-5): ").strip()
 
         if choice == "1":
-            list_spl_balances(priv_key_b58)
+            list_spl_balances(sender_pubkey)
 
         elif choice in ["2", "3"]:
             print("\n" + "+" * 60)
@@ -895,7 +876,7 @@ def main():
             yes_or_no = input("Type 'yes' to confirm and execute: ").strip().lower()
             if yes_or_no == "yes":
                 try:
-                    transfer_sol(target_sol_address, requested_amount_sol, priv_key_b58)
+                    transfer_sol(target_sol_address, requested_amount_sol, sender_pubkey, sender)
                 except Exception as e:
                     print(f"\n[!] Execution Error: {e}")
             else:
@@ -957,7 +938,7 @@ def main():
             yes_or_no = input("Type 'yes' to confirm and execute: ").strip().lower()
             if yes_or_no == "yes":
                 try:
-                    transfer_spl_token(target_sol_address, token_mint_addr, requested_amount_tokens, priv_key_b58)
+                    transfer_spl_token(target_sol_address, token_mint_addr, requested_amount_tokens, sender_pubkey, sender)
                 except Exception as e:
                     print(f"\n[!] Execution Error: {e}")
             else:
