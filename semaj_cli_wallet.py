@@ -15,14 +15,16 @@ from base58 import b58decode
 from getpass import getpass
 from chinese_converter import to_simplified
 from mnemonic import Mnemonic
-from solana.rpc.types import TokenAccountOpts
-from solana.rpc.types import TxOpts
-from solana.rpc.api import Client
+
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams
 from solders.message import MessageV0
 from solders.transaction import VersionedTransaction
+
+from solana.rpc.types import TokenAccountOpts
+from solana.rpc.types import TxOpts
+from solana.rpc.api import Client
 from spl.token.constants import TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
 from spl.token.instructions import (
     transfer_checked,
@@ -70,6 +72,7 @@ DERIVATION_PATHS={
     "PHANTOM"       : "m/44'/501'/{index}'/0'",
     "CUSTOM"        : "m/44'/501'/0'/0'",  # Placeholder for your own type
 }
+SEMAJ_ENCRYPTION_ADDON = r"%Semaj'sFancy&SimpleSolanaWallet%"
 
 def int2bin     (i,     n) : return bin(i         )[2:].zfill(n)
 def hex2bin     (h,     n) : return bin(int(h, 16))[2:].zfill(n)
@@ -205,6 +208,7 @@ def encrypt_workflow():
         sys.exit(1)
         
     passcode = getpass("Enter a strong passcode (hidden typing): ")
+    passcode = f"{SEMAJ_ENCRYPTION_ADDON}+{passcode}"
 
     # Generate cryptographically secure random values
     salt = os.urandom(16)   
@@ -266,6 +270,7 @@ def decrypt(payload: str, passcode=None):
         sys.exit(1)
         
     passcode = passcode if passcode != None else getpass("Enter the decryption password (hidden typing): ")
+    passcode = f"{SEMAJ_ENCRYPTION_ADDON}+{passcode}"
     
     try:
         key = derive_key(passcode, salt)
@@ -538,7 +543,6 @@ def verify_token_mint(client, token_mint_addr):
         print(" " + "!" * 70)
         raise Exception(f"Validation Error: Invalid token mint address ({e}).")
 
-
 def transfer_sol(to_sol_addr, amount_in_sol, sender_pubkey, sender):
     print("=" * 60 + "\nSolana Transfer Script\n" + "=" * 60)
     
@@ -790,6 +794,25 @@ def list_spl_balances(sender_pubkey):
     print("=" * 60)
     return token_list
 
+def create_keypair(user_input_raw, user_derive_path):
+    # 1. Safe credential handling
+    if user_input_raw == "#":
+        input_raw = scan_qr_from_camera()
+        if not input_raw:
+            print("[!] No QR Code detected!")
+            sys.exit(1)
+    else: 
+        input_raw = user_input_raw
+
+    priv_key_b58 = process_to_keypair(input_raw, user_derive_path or "LEDGER")
+
+    if not priv_key_b58:
+        print("[!] Private key cannot be empty.")
+        sys.exit(1)
+        
+    return Keypair.from_bytes(b58decode(priv_key_b58))
+
+
 def main():
     print("=" * 60)
     print("        Semaj's SOLANA WALLET INTERACTIVE CLI MANAGER")
@@ -807,25 +830,9 @@ def main():
         # NOTE: format : "path=PHANTOM" or "path=PHANTOM_1" for 2nd, _2 for 3rd
         user_derive_path = sys.argv[1][5:]
 
-    # 1. Safe credential handling
     user_input_raw = input('Enter An Integer, or "#" for Scanning a QR Code, or #${English words} for Seed Phrases, or #!{input} to eval({input}) :\n')
-    if user_input_raw == "#":
-        input_raw = scan_qr_from_camera()
-        if not input_raw:
-            print("[!] No QR Code detected!")
-            sys.exit(1)
-    else: 
-        input_raw = user_input_raw
 
-    priv_key_b58 = process_to_keypair(input_raw, user_derive_path or "LEDGER")
-
-    # priv_key_b58 = input('Enter your Base58 Private Key: ').strip()
-    if not priv_key_b58:
-        print("[!] Private key cannot be empty.")
-        sys.exit(1)
-        
-    sender = Keypair.from_bytes(b58decode(priv_key_b58))
-    # Instantly derive and show address to let user know they logged into the right wallet
+    sender = create_keypair(user_input_raw, user_derive_path)
     sender_pubkey = sender.pubkey()
     print(f"[✓] Wallet Loaded: {sender_pubkey}\n")
     
