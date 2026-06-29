@@ -10,21 +10,30 @@ import sys
 import time
 import hashlib
 import qrcode
+import struct
 import base64
 from base58 import b58decode
 from getpass import getpass
 from chinese_converter import to_simplified
 from mnemonic import Mnemonic
-
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solders.system_program import transfer, TransferParams
 from solders.message import MessageV0
 from solders.transaction import VersionedTransaction
-
+from solders.instruction import Instruction, AccountMeta
+from solders.system_program import (
+    transfer,
+    TransferParams,
+    create_account,
+    CreateAccountParams
+)
+from solders.rpc.filter import Memcmp
+from solders.sysvar import RENT, CLOCK, STAKE_HISTORY
+from solana.rpc.types import MemcmpOpts
 from solana.rpc.types import TokenAccountOpts
 from solana.rpc.types import TxOpts
 from solana.rpc.api import Client
+import solana.rpc.api as stake_api
 from spl.token.constants import TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
 from spl.token.instructions import (
     transfer_checked,
@@ -32,6 +41,9 @@ from spl.token.instructions import (
     create_associated_token_account,
     get_associated_token_address
 )
+
+STAKE_PROGRAM_ID = Pubkey.from_string("Stake11111111111111111111111111111111111111")
+NEVER_DEACTIVATED = 0xFFFFFFFFFFFFFFFF  # Rust u64::MAX (Indicates account is active)
 
 # Hardcoded Known Token Registry
 KNOWN_TOKEN_DICT = {
@@ -54,6 +66,7 @@ KNOWN_TOKEN_DICT_REVERSE = {v.upper(): k for k, v in KNOWN_TOKEN_DICT.items()}
 USE_MINIMAL_FEE = True
 
 RPC_URL = "https://api.mainnet-beta.solana.com"
+# RPC_URL = "https://api.devnet.solana.com"
 LAMPORTS_PER_SOL = 1_000_000_000
 
 # ###
@@ -813,11 +826,256 @@ def create_keypair(user_input_raw, user_derive_path):
     return Keypair.from_bytes(b58decode(priv_key_b58))
 
 
+def stake_sol(amount_in_sol, validator_vote_addr, sender_pubkey, sender):
+    print("=" * 60 + "\nSolana Stake Script\n" + "=" * 60)
+    print("[1/7] Connecting RPC...")
+    client = Client(RPC_URL)
+    print(" RPC connected")
+
+    print("[2/7] Generating new Stake Account Keypair...")
+    stake_account = Keypair()
+    stake_pubkey = stake_account.pubkey()
+    validator_pubkey = Pubkey.from_string(validator_vote_addr)
+    print(f" Stake Account: {stake_pubkey}")
+    print(f" Validator Vote Address: {validator_pubkey}")
+
+    print("[3/7] Fetching rent-exemption and balance...")
+    # FIX: Native Solana stake accounts MUST be exactly 200 bytes, not 228
+    rent_exempt_balance = client.get_minimum_balance_for_rent_exemption(200).value
+    lamports_to_stake = int(float(amount_in_sol) * LAMPORTS_PER_SOL)
+    total_lamports_needed = lamports_to_stake + rent_exempt_balance
+
+    balance = client.get_balance(sender_pubkey).value
+    print(f" Wallet Balance: {balance / LAMPORTS_PER_SOL:.9f} SOL")
+    print(f" Required Balance: {total_lamports_needed / LAMPORTS_PER_SOL:.9f} SOL")
+
+    if balance < total_lamports_needed:
+        raise Exception("Insufficient balance to cover stake amount + account rent.")
+
+    print("[4/7] Fetching latest blockhash...")
+    blockhash = client.get_latest_blockhash().value.blockhash
+
+    print("[5/7] Building Staking Layout Instructions...")
+
+    # 1. System Account Allocation Instruction
+    ix_create = create_account(
+        CreateAccountParams(
+            from_pubkey=sender_pubkey,
+            to_pubkey=stake_pubkey,
+            lamports=total_lamports_needed,
+            space=200, # FIX: Swapped from 228 to matching 200 byte layout
+            owner=STAKE_PROGRAM_ID
+        )
+    )
+
+    # 2. Native Initialize Profile Instruction (Exact 116-Byte Flat C-Struct Payload)
+    ix_init_data = (
+        struct.pack("<I", 0) +                 # 4 bytes  - Initialize instruction discriminator
+        bytes(sender_pubkey) +                 # 32 bytes - Authorized.staker
+        bytes(sender_pubkey) +                 # 32 bytes - Authorized.withdrawer
+        struct.pack("<q", 0) +                 # 8 bytes  - Lockup.unix_timestamp (i64)
+        struct.pack("<Q", 0) +                 # 8 bytes  - Lockup.epoch (u64)
+        bytes(Pubkey.default())                # 32 bytes - Lockup.custodian (32-byte Pubkey)
+    )
+
+    ix_init = Instruction(
+        program_id=STAKE_PROGRAM_ID,
+        data=ix_init_data,
+        accounts=[
+            AccountMeta(pubkey=stake_pubkey, is_signer=False, is_writable=True),
+            AccountMeta(pubkey=RENT, is_signer=False, is_writable=False)
+        ]
+    )
+
+    # 3. Delegation Routing Instruction
+    ix_delegate_data = struct.pack("<I", 2)    # 4 bytes - Delegate instruction discriminator
+
+    ix_delegate = Instruction(
+        program_id=STAKE_PROGRAM_ID,
+        data=ix_delegate_data,
+        accounts=[
+            AccountMeta(pubkey=stake_pubkey, is_signer=False, is_writable=True),
+            AccountMeta(pubkey=validator_pubkey, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=CLOCK, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=STAKE_HISTORY, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=sender_pubkey, is_signer=True, is_writable=False)
+        ]
+    )
+
+    print("[6/7] Compiling transaction...")
+    msg = MessageV0.try_compile(sender_pubkey, [ix_create, ix_init, ix_delegate], [], blockhash)
+    tx = VersionedTransaction(msg, [sender, stake_account])
+
+    print("[7/7] Sending Transaction...")
+    resp = client.send_transaction(tx, opts=TxOpts(skip_preflight=False))
+    signature = resp.value
+
+    print("\n|" + "=" * 10 + "\t> STAKE SUCCESS!")
+    print(f"Signature: {signature}")
+    print(f"Stake Account Created: {stake_pubkey}")
+    print(f"https://solscan.io{signature}")
+    print("=" * 60)
+    return signature
+
+def unstake_sol(stake_account_addr, sender_pubkey, sender, action="deactivate"):
+    print("=" * 60 + f"\nSolana Unstake Script ({action.upper()})\n" + "=" * 60)
+    print("[1/6] Connecting RPC...")
+    client = Client(RPC_URL)
+    print(" RPC connected")
+
+    stake_pubkey = Pubkey.from_string(stake_account_addr)
+    print(f"[2/6] Target Stake Account: {stake_pubkey}")
+
+    print("[3/6] Fetching latest blockhash...")
+    blockhash = client.get_latest_blockhash().value.blockhash
+
+    print("[4/6] Constructing instruction layout...")
+    # FIX: Replaced broken 'stake_api' layout calls with bulletproof manual bytecode mappings
+    # FIX: Change the instruction layout block inside unstake_sol
+    if action.lower() == "deactivate":
+        # CHANGE THIS LINE (Change 4 to 5):
+        ix_data = struct.pack("<I", 5) # Deactivate Discriminator is 5
+
+        ix = Instruction(
+            program_id=STAKE_PROGRAM_ID,
+            data=ix_data,
+            accounts=[
+                AccountMeta(pubkey=stake_pubkey, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=CLOCK, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=sender_pubkey, is_signer=True, is_writable=False)
+            ]
+        )
+    elif action.lower() == "withdraw":
+        stake_balance = client.get_balance(stake_pubkey).value
+        if stake_balance <= 0:
+            raise Exception("No funds available in this stake account to withdraw.")
+
+        # FIX: Change the discriminator from 3 to 4 to target the true Withdraw enum slot
+        ix_data = (
+            struct.pack("<I", 4) +          # 4 bytes - Withdraw Discriminator
+            struct.pack("<Q", stake_balance) # 8 bytes - Total Lamports Balance Amount
+        )
+        
+        ix = Instruction(
+            program_id=STAKE_PROGRAM_ID,
+            data=ix_data,
+            accounts=[
+                AccountMeta(pubkey=stake_pubkey, is_signer=False, is_writable=True),   # Source Stake Acc
+                AccountMeta(pubkey=sender_pubkey, is_signer=False, is_writable=True),  # Destination Wallet
+                AccountMeta(pubkey=CLOCK, is_signer=False, is_writable=False),          # Clock Sysvar
+                AccountMeta(pubkey=STAKE_HISTORY, is_signer=False, is_writable=False),  # StakeHistory Sysvar
+                AccountMeta(pubkey=sender_pubkey, is_signer=True, is_writable=False)   # Withdrawer Authority Signer
+            ]
+        )
+    else:
+        raise ValueError("Invalid action. Choose 'deactivate' or 'withdraw'.")
+
+    print("[5/6] Building transaction...")
+    msg = MessageV0.try_compile(sender_pubkey, [ix], [], blockhash)
+    tx = VersionedTransaction(msg, [sender])
+
+    print("[6/6] Broadcast transaction...")
+    resp = client.send_transaction(tx, opts=TxOpts(skip_preflight=False))
+    signature = resp.value
+
+    print("\n|" + "=" * 10 + f"\t> {action.upper()} SUCCESS!")
+    print(f"Signature: {signature}")
+    print(f"https://solscan.io{signature}")
+    print("=" * 60)
+    return signature
+
+
+def get_stake_lifecycle(raw_data: bytes, current_epoch: int) -> str:
+    """Parses raw account data to calculate the current stake lifecycle status."""
+    if len(raw_data) < 180:
+        return "Unknown (Malformed)"
+
+    # 1. Decode Structural State (Bytes 0-4: u32 enum discriminator)
+    state_discriminator = struct.unpack("<I", raw_data[:4])[0]
+
+    if state_discriminator == 0:
+        return "Uninitialized"
+    if state_discriminator == 1:
+        return "Initialized"
+    if state_discriminator != 2:
+        return "Unknown"
+
+    # 2. Decode Delegation History (Bytes 164-172 & 172-180: u64 epochs)
+    activation_epoch = struct.unpack("<Q", raw_data[164:172])[0]
+    deactivation_epoch = struct.unpack("<Q", raw_data[172:180])[0]
+
+    # 3. Evaluate Solana Dynamic Lifecycle Rules
+    if deactivation_epoch == NEVER_DEACTIVATED:
+        return "Activating" if current_epoch < activation_epoch else "Active"
+    else:
+        return "Deactivating" if current_epoch < deactivation_epoch else "Deactivated"
+
+def list_stakes(sender_pubkey: Pubkey):
+    print("=" * 85 + "\nSolana Active Stake Accounts\n" + "=" * 85)
+    print("[1/3] Connecting RPC...")
+    client = Client(RPC_URL)
+
+    # Fetch network metadata required to evaluate epoch warm-up/cool-down
+    epoch_info = client.get_epoch_info().value
+    current_epoch = epoch_info.epoch
+
+    print("[2/3] Querying program accounts for Stake program...")
+
+    staker_filter = MemcmpOpts(
+        offset=12,
+        bytes=str(sender_pubkey)
+    )
+
+    response = client.get_program_accounts(
+        STAKE_PROGRAM_ID,
+        filters=[staker_filter]
+    )
+
+    # FIX: Corrected the reversed ternary filter condition logic
+    stake_accounts = response.value if response.value is not None else []
+    print(f" Found {len(stake_accounts)} stake accounts.\n")
+
+    print(f"{'Stake Account Address':<46} | {'Balance (SOL)':<15} | {'Status':<15}")
+    print("-" * 85)
+
+    print("[3/3] Parsing details...")
+    for account in stake_accounts:
+        pubkey_str = str(account.pubkey)
+        sol_value = account.account.lamports / LAMPORTS_PER_SOL
+
+        raw_data = account.account.data
+        status_str = "Unknown"
+
+        if len(raw_data) >= 180:
+            # FIX: Added index [0] to peel away Python's tuple wrapping wrapper brackets
+            state_discriminator = struct.unpack("<I", raw_data[:4])[0]
+
+            if state_discriminator == 0:
+                status_str = "Uninitialized"
+            elif state_discriminator == 1:
+                status_str = "Initialized"
+            elif state_discriminator == 2:
+                # FIX: Added index [0] to extract raw tuple values for tracking calculations
+                activation_epoch = struct.unpack("<Q", raw_data[164:172])[0]
+                deactivation_epoch = struct.unpack("<Q", raw_data[172:180])[0]
+
+                if deactivation_epoch == NEVER_DEACTIVATED:
+                    status_str = "Activating" if current_epoch < activation_epoch else "Active"
+                else:
+                    status_str = "Deactivating" if current_epoch < deactivation_epoch else "Deactivated"
+
+        # Standardized cell widths guarantee vertical line alignment
+        formatted_balance = f"{sol_value:.4f} SOL"
+        print(f"{pubkey_str:<46} | {formatted_balance:<15} | {status_str:<15}")
+
+    print("=" * 85)
+
+
 def main():
     print("=" * 60)
     print("        Semaj's SOLANA WALLET INTERACTIVE CLI MANAGER")
     print("=" * 60)
-    
+
     if len(sys.argv) > 1 and sys.argv[1].upper() == 'ENCRYPT':
         print("*" * 60)
         print("        For string encryption only!")
@@ -835,7 +1093,7 @@ def main():
     sender = create_keypair(user_input_raw, user_derive_path)
     sender_pubkey = sender.pubkey()
     print(f"[✓] Wallet Loaded: {sender_pubkey}\n")
-    
+
     while True:
         print("\n" + "=" * 50)
         print(" SELECT AN ACTION:")
@@ -844,10 +1102,13 @@ def main():
         print(" 3. Transfer SOL [Scan Camera QR Code]")
         print(" 4. Transfer SPL Tokens [Manual Input]")
         print(" 5. Transfer SPL Tokens [Scan Camera QR Code]")
+        print(" 6. List Active Stake Accounts")
+        print(" 7. Stake SOL (Delegate to Validator)")
+        print(" 8. Unstake SOL (Deactivate or Withdraw)")
         print(" 0. Exit")
         print("=" * 50)
 
-        choice = input("Enter option (0-5): ").strip()
+        choice = input("Enter option (0-8): ").strip()
 
         if choice == "1":
             list_spl_balances(sender_pubkey)
@@ -857,7 +1118,6 @@ def main():
             print(" INITIATING NATIVE SOL TRANSFER")
             print("+" * 60)
 
-            # Dynamic choice evaluation hook handles input routing
             if choice == "3":
                 target_sol_address = scan_qr_from_camera()
                 if not target_sol_address:
@@ -886,7 +1146,7 @@ def main():
             print(f"  - Target: {target_sol_address}")
             print(" " + "!" * 60)
             print("!!! This step CANNOT be undone, PLEASE double check details !!!")
-            
+
             yes_or_no = input("Type 'yes' to confirm and execute: ").strip().lower()
             if yes_or_no == "yes":
                 try:
@@ -895,13 +1155,12 @@ def main():
                     print(f"\n[!] Execution Error: {e}")
             else:
                 print("Transaction Cancelled!")
-                
+
         elif choice in ["4", "5"]:
             print("\n" + "+" * 60)
             print(" INITIATING SPL TOKEN TRANSFER")
             print("+" * 60)
 
-            # Dynamic choice evaluation hook handles input routing
             if choice == "5":
                 target_sol_address = scan_qr_from_camera()
                 if not target_sol_address:
@@ -914,21 +1173,16 @@ def main():
                 print("[!] Target address cannot be empty.")
                 continue
 
-            # Create a user-friendly string for the prompt: "USDC,CBBTC,USDT,JitoSOL,WSOL"
             known_tokens_prompt = ','.join(KNOWN_TOKEN_DICT_REVERSE.keys())
-
             token_mint_addr_input = input(f'Enter the SPL TOKEN MINT ADDRESS or Token Name ({known_tokens_prompt}):\n').strip()
 
             if not token_mint_addr_input:
                 print("[!] Token Mint address cannot be empty.")
                 continue
 
-            # Check if input is likely a shortcut name or a full public key address
             if len(token_mint_addr_input) <= 20:
-                # Force user input to UPPERCASE to guarantee a match against your keys
                 token_mint_addr = KNOWN_TOKEN_DICT_REVERSE.get(token_mint_addr_input.upper(), token_mint_addr_input)
             else:
-                # Safely assign the raw address if the string is long (over 20 characters)
                 token_mint_addr = token_mint_addr_input
 
             try:
@@ -939,7 +1193,7 @@ def main():
             except ValueError:
                 print("[!] Invalid amount entered.")
                 continue
-                
+
             print("\n" + "!" * 60)
             print(f" REVIEW TRANSACTION:")
             print(f"  - Action: Sending SPL Token")
@@ -948,7 +1202,7 @@ def main():
             print(f"  - Target: {target_sol_address} (System will resolve ATA automatically)")
             print(" " + "!" * 60)
             print("!!! This step CANNOT be undone, PLEASE double check details !!!")
-            
+
             yes_or_no = input("Type 'yes' to confirm and execute: ").strip().lower()
             if yes_or_no == "yes":
                 try:
@@ -957,12 +1211,91 @@ def main():
                     print(f"\n[!] Execution Error: {e}")
             else:
                 print("Transaction Cancelled!")
-                
+
+        elif choice == "6":
+            try:
+                list_stakes(sender_pubkey)
+            except Exception as e:
+                print(f"\n[!] Error scanning stake accounts: {e}")
+
+        elif choice == "7":
+            print("\n" + "+" * 60)
+            print(" INITIATING SOL DELEGATION (STAKING)")
+            print("+" * 60)
+
+            validator_addr = input("Enter the VALIDATOR VOTE ADDRESS:\n").strip()
+            if not validator_addr:
+                print("[!] Validator address cannot be empty.")
+                continue
+
+            try:
+                requested_amount_sol = float(input("Enter the AMOUNT of SOL to stake:\n").strip())
+                if requested_amount_sol <= 0:
+                    print("[!] Amount must be greater than 0.")
+                    continue
+            except ValueError:
+                print("[!] Invalid amount entered.")
+                continue
+
+            print("\n" + "!" * 60)
+            print(f" REVIEW STAKE TRANSACTION:")
+            print(f"  - Action: Creating & Delegating Stake Account")
+            print(f"  - Amount: {requested_amount_sol} SOL")
+            print(f"  - Target Validator: {validator_addr}")
+            print(" " + "!" * 60)
+
+            yes_or_no = input("Type 'yes' to confirm and execute: ").strip().lower()
+            if yes_or_no == "yes":
+                try:
+                    stake_sol(requested_amount_sol, validator_addr, sender_pubkey, sender)
+                except Exception as e:
+                    print(f"\n[!] Execution Error: {e}")
+            else:
+                print("Staking Cancelled!")
+
+        elif choice == "8":
+            print("\n" + "+" * 60)
+            print(" INITIATING UNSTAKE / WITHDRAW ACTION")
+            print("+" * 60)
+
+            stake_addr = input("Enter the STAKE ACCOUNT ADDRESS:\n").strip()
+            if not stake_addr:
+                print("[!] Stake account address cannot be empty.")
+                continue
+
+            print("Select Unstake Action Type:")
+            print(" 1. Deactivate (Stop earning rewards, start warming down)")
+            print(" 2. Withdraw (Move settled inactive funds back to main wallet)")
+            action_choice = input("Enter option (1-2): ").strip()
+
+            if action_choice == "1":
+                action_str = "deactivate"
+            elif action_choice == "2":
+                action_str = "withdraw"
+            else:
+                print("[!] Invalid selection.")
+                continue
+
+            print("\n" + "!" * 60)
+            print(f" REVIEW UNSTAKE ACTION:")
+            print(f"  - Action: {action_str.upper()}")
+            print(f"  - Target Stake Account: {stake_addr}")
+            print(" " + "!" * 60)
+
+            yes_or_no = input("Type 'yes' to confirm and execute: ").strip().lower()
+            if yes_or_no == "yes":
+                try:
+                    unstake_sol(stake_addr, sender_pubkey, sender, action=action_str)
+                except Exception as e:
+                    print(f"\n[!] Execution Error: {e}")
+            else:
+                print("Action Cancelled!")
+
         elif choice == "0":
             print("\nExiting. Goodbye!")
             break
         else:
-            print("[!] Invalid option selected. Please enter a choice between 0 and 5.")
+            print("[!] Invalid option selected. Please enter a choice between 0 and 8.")
 
 if __name__ == "__main__":
     main()
