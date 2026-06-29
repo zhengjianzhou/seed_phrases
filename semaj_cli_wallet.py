@@ -1038,6 +1038,9 @@ def list_stakes(sender_pubkey: Pubkey):
     print(f"{'Stake Account Address':<46} | {'Balance (SOL)':<15} | {'Status':<15}")
     print("-" * 85)
 
+    # --- ONLY ADDED THIS LINE BELOW ---
+    ui_records = []
+
     print("[3/3] Parsing details...")
     for account in stake_accounts:
         pubkey_str = str(account.pubkey)
@@ -1068,7 +1071,21 @@ def list_stakes(sender_pubkey: Pubkey):
         formatted_balance = f"{sol_value:.4f} SOL"
         print(f"{pubkey_str:<46} | {formatted_balance:<15} | {status_str:<15}")
 
+        # --- ONLY ADDED THIS BLOCK BELOW ---
+        validator_vote = "N/A"
+        if len(raw_data) >= 156 and status_str in ["Activating", "Active", "Deactivating", "Deactivated"]:
+            validator_vote = str(Pubkey.from_bytes(raw_data[124:156]))
+
+        ui_records.append({
+            "address": pubkey_str,
+            "balance": sol_value,
+            "status": status_str,
+            "validator": validator_vote
+        })
+
     print("=" * 85)
+    # --- ONLY ADDED THIS RETURN STATEMENT BELOW ---
+    return ui_records
 
 
 def main():
