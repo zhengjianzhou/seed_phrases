@@ -26,7 +26,6 @@ from solders.rpc.filter import Memcmp
 from solders.sysvar import RENT, CLOCK, STAKE_HISTORY
 from solana.rpc.types import MemcmpOpts, TxOpts, TokenAccountOpts
 from solana.rpc.api import Client
-import solana.rpc.api as stake_api
 from spl.token.constants import TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
 from spl.token.instructions import transfer_checked, TransferCheckedParams, create_associated_token_account, get_associated_token_address
 
@@ -136,7 +135,7 @@ def validate_seed_phrase(input_str: str) -> bool:
     # Split by commas or spaces, filtering out any empty strings caused by multiple spaces or commas
     words = [word.lower().strip() for word in re.split(r'[,\s]+', input_str) if word.strip()]
 
-    # FIXED: Added the explicit target lengths [12, 24] to complete the condition statement safely
+    # Added the explicit target lengths [12, 24] to complete the condition statement safely
     if len(words) not in [12, 24]:
         return False
 
@@ -863,7 +862,6 @@ def stake_sol(amount_in_sol, validator_vote_addr, sender_pubkey, sender):
     print(f" Validator Vote Address: {validator_pubkey}")
 
     print("[3/7] Fetching rent-exemption and balance...")
-    # FIX: Native Solana stake accounts MUST be exactly 200 bytes, not 228
     rent_exempt_balance = client.get_minimum_balance_for_rent_exemption(200).value
     lamports_to_stake = int(float(amount_in_sol) * LAMPORTS_PER_SOL)
     total_lamports_needed = lamports_to_stake + rent_exempt_balance
@@ -886,7 +884,7 @@ def stake_sol(amount_in_sol, validator_vote_addr, sender_pubkey, sender):
             from_pubkey=sender_pubkey,
             to_pubkey=stake_pubkey,
             lamports=total_lamports_needed,
-            space=200, # FIX: Swapped from 228 to matching 200 byte layout
+            space=200,
             owner=STAKE_PROGRAM_ID
         )
     )
@@ -953,10 +951,7 @@ def unstake_sol(stake_account_addr, sender_pubkey, sender, action="deactivate"):
     blockhash = client.get_latest_blockhash().value.blockhash
 
     print("[4/6] Constructing instruction layout...")
-    # FIX: Replaced broken 'stake_api' layout calls with bulletproof manual bytecode mappings
-    # FIX: Change the instruction layout block inside unstake_sol
     if action.lower() == "deactivate":
-        # CHANGE THIS LINE (Change 4 to 5):
         ix_data = struct.pack("<I", 5) # Deactivate Discriminator is 5
 
         ix = Instruction(
@@ -973,7 +968,6 @@ def unstake_sol(stake_account_addr, sender_pubkey, sender, action="deactivate"):
         if stake_balance <= 0:
             raise Exception("No funds available in this stake account to withdraw.")
 
-        # FIX: Change the discriminator from 3 to 4 to target the true Withdraw enum slot
         ix_data = (
             struct.pack("<I", 4) +          # 4 bytes - Withdraw Discriminator
             struct.pack("<Q", stake_balance) # 8 bytes - Total Lamports Balance Amount
@@ -1054,14 +1048,12 @@ def list_stakes(sender_pubkey: Pubkey):
         filters=[staker_filter]
     )
 
-    # FIX: Corrected the reversed ternary filter condition logic
     stake_accounts = response.value if response.value is not None else []
     print(f" Found {len(stake_accounts)} stake accounts.\n")
 
     print(f"{'Stake Account Address':<46} | {'Balance (SOL)':<15} | {'Status':<15}")
     print("-" * 85)
 
-    # --- ONLY ADDED THIS LINE BELOW ---
     ui_records = []
 
     print("[3/3] Parsing details...")
@@ -1073,7 +1065,6 @@ def list_stakes(sender_pubkey: Pubkey):
         status_str = "Unknown"
 
         if len(raw_data) >= 180:
-            # FIX: Added index [0] to peel away Python's tuple wrapping wrapper brackets
             state_discriminator = struct.unpack("<I", raw_data[:4])[0]
 
             if state_discriminator == 0:
@@ -1081,7 +1072,6 @@ def list_stakes(sender_pubkey: Pubkey):
             elif state_discriminator == 1:
                 status_str = "Initialized"
             elif state_discriminator == 2:
-                # FIX: Added index [0] to extract raw tuple values for tracking calculations
                 activation_epoch = struct.unpack("<Q", raw_data[164:172])[0]
                 deactivation_epoch = struct.unpack("<Q", raw_data[172:180])[0]
 
