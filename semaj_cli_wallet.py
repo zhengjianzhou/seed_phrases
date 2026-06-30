@@ -137,6 +137,37 @@ def b36_checksum(bitstring):
     bit_string_b36_checksum = ''.join(sorted(dedup(bit_string_b36)[:4]))
     return bit_string_b36_checksum 
 
+def validate_seed_phrase(input_str: str) -> bool:
+    """
+    Validates if an input string is a comma or space-separated English BIP39 seed phrase.
+    Checks that every word exists in the official wordlist and the count is exactly 12 or 24.
+    """
+    import re
+    if not input_str or not isinstance(input_str, str):
+        return False
+
+    # Split by commas or spaces, filtering out any empty strings caused by multiple spaces or commas
+    words = [word.lower().strip() for word in re.split(r'[,\s]+', input_str) if word.strip()]
+
+    # FIXED: Added the explicit target lengths [12, 24] to complete the condition statement safely
+    if len(words) not in [12, 24]:
+        return False
+
+    try:
+        # Load the official English BIP39 wordlist matrix from the library
+        mnemo = Mnemonic("english")
+        wordlist = set(mnemo.wordlist)  # Convert to a set wrapper optimization for high-speed O(1) lookups
+
+        # Check if every individual word exists inside the English dictionary list
+        for word in words:
+            if word not in wordlist:
+                return False
+
+        return words
+    except Exception as err:
+        print(f"[SEED VALIDATION ERROR] {err}")
+        return False
+
 def print_qr_terminal(*strings):
     # Filter out empty inputs
     inputs = [s for s in strings if s]
@@ -211,18 +242,9 @@ def derive_key(passcode: str, salt: bytes) -> bytes:
     )
     return kdf.derive(passcode.encode())
 
-def encrypt_workflow():
-    """Prompts for input, encrypts it, and displays a compact text-based QR code."""
+def encrypt(plain_text, passcode):
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-    plain_text = input("Enter text to encrypt: ").strip()
-    if not plain_text:
-        print("Error: Input text cannot be empty.")
-        sys.exit(1)
-        
-    passcode = getpass("Enter a strong passcode (hidden typing): ")
     passcode = f"{SEMAJ_ENCRYPTION_ADDON}+{passcode}"
-
     # Generate cryptographically secure random values
     salt = os.urandom(16)   
     nonce = os.urandom(12)  
@@ -235,6 +257,19 @@ def encrypt_workflow():
     # Bundle into a single payload string
     payload = f"{base64.b64encode(salt).decode()}.{base64.b64encode(nonce).decode()}.{base64.b64encode(ciphertext).decode()}"
     payload = f"#!decrypt(\"{payload}\")"
+    return payload
+
+def encrypt_workflow():
+    """Prompts for input, encrypts it, and displays a compact text-based QR code."""
+    plain_text = input("Enter text to encrypt: ").strip()
+    if not plain_text:
+        print("Error: Input text cannot be empty.")
+        sys.exit(1)
+        
+    passcode = getpass("Enter a strong passcode (hidden typing): ")
+
+    payload = encrypt(plain_text, passcode)
+
     print("\n=== Encryption Successful ===")
     print("Secure Payload String:")
     print(payload)
@@ -418,16 +453,14 @@ def process_to_keypair(input_raw, wallet_path_name):
     """Parses inputs, converts binary entropy to mnemonics, and derives keys."""
     input_refined = str(input_raw).strip()
 
-    while input_refined.startswith('#'):
-        if input_refined.startswith('#$'):
-            _step1 = input_refined[2:]
-            _step2 = _step1.replace(","," ").replace("  "," ").replace("  "," ").split(" ")
-            _step3 = seed2int(_step2)
-            input_refined = str(_step3)
+    while input_refined.startswith('#!'):
+        _step1 = eval(input_refined[2:])
+        input_refined = str(_step1)
 
-        if input_refined.startswith('#!'):
-            _step1 = eval(input_refined[2:])
-            input_refined = str(_step1)
+    words = validate_seed_phrase(input_refined)
+    if words:
+        input_refined = seed2int(words)
+        input_refined = str(input_refined)
 
     if not input_refined.isdigit(): # upto here all must be digit otherwise hash to int
         input_refined = str(sha256i(input_refined))
