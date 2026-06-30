@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 #
 # A helper CLI tool to generate a solana address - Semaj.Gnehz 2026/05/29
-# pip3 install qrcode solders mnemonic solana base58 chinese_converter
 #
 
 import io
 import os
+import re
 import sys
 import time
 import hashlib
@@ -21,26 +21,14 @@ from solders.pubkey import Pubkey
 from solders.message import MessageV0
 from solders.transaction import VersionedTransaction
 from solders.instruction import Instruction, AccountMeta
-from solders.system_program import (
-    transfer,
-    TransferParams,
-    create_account,
-    CreateAccountParams
-)
+from solders.system_program import transfer, TransferParams, create_account, CreateAccountParams
 from solders.rpc.filter import Memcmp
 from solders.sysvar import RENT, CLOCK, STAKE_HISTORY
-from solana.rpc.types import MemcmpOpts
-from solana.rpc.types import TokenAccountOpts
-from solana.rpc.types import TxOpts
+from solana.rpc.types import MemcmpOpts, TxOpts, TokenAccountOpts
 from solana.rpc.api import Client
 import solana.rpc.api as stake_api
 from spl.token.constants import TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
-from spl.token.instructions import (
-    transfer_checked,
-    TransferCheckedParams,
-    create_associated_token_account,
-    get_associated_token_address
-)
+from spl.token.instructions import transfer_checked, TransferCheckedParams, create_associated_token_account, get_associated_token_address
 
 STAKE_PROGRAM_ID = Pubkey.from_string("Stake11111111111111111111111111111111111111")
 NEVER_DEACTIVATED = 0xFFFFFFFFFFFFFFFF  # Rust u64::MAX (Indicates account is active)
@@ -142,7 +130,6 @@ def validate_seed_phrase(input_str: str) -> bool:
     Validates if an input string is a comma or space-separated English BIP39 seed phrase.
     Checks that every word exists in the official wordlist and the count is exactly 12 or 24.
     """
-    import re
     if not input_str or not isinstance(input_str, str):
         return False
 
@@ -437,6 +424,9 @@ def scan_qr_from_camera():
     cv2.waitKey(1)
 
     return detected_address
+
+def b58_to_signer(the_b58):
+    return Keypair.from_bytes(b58decode(the_b58))
 
 def get_solana_balance(pubkey_obj: Pubkey) -> str:
     """Connects to the Solana Mainnet RPC to check a public key balance."""
